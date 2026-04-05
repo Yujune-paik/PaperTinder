@@ -1,0 +1,29 @@
+search:
+  default_venues:
+    - "CHI"
+    - "UIST"
+    - "CSCW"
+    - "Ubicomp"
+    - "ISWC"
+    - "HRI"
+    - "ISS"
+    - "CVPR"
+    - "NeurIPS"
+    - "ICCV"
+    - "ICML"
+    - "ECCV"
+    - "Nature"
+    - "Science"
+    - "Science Robotics"
+  default_year: 2024
+  results_per_query: 30
+  shuffle: true
+
+pdf:
+  max_text_chars: 12000
+  min_figure_size_px: 200
+
+summary:
+  model: "gpt-4o"
+  language: "ja"
+  custom_sections: []
