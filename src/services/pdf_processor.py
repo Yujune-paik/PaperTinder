@@ -5,14 +5,20 @@ import logging
 import re
 from pathlib import Path
 
-import fitz
 import httpx
-import pymupdf4llm
 
 from src.models import ProcessedPDF
 from src.services import storage
 
 logger = logging.getLogger(__name__)
+
+try:
+    import fitz
+    import pymupdf4llm
+    HAS_PYMUPDF = True
+except ImportError:
+    HAS_PYMUPDF = False
+    logger.info("PyMuPDF not available — PDF text extraction and figure rendering disabled")
 
 MIN_FIGURE_SIZE = 200
 MAX_TEXT_CHARS = 12000
@@ -67,6 +73,9 @@ async def _get_s2_oa_url(client: httpx.AsyncClient, doi: str | None) -> str | No
 
 
 async def download_pdf(url: str | None, paper_id: str, doi: str | None = None) -> Path | None:
+    if not HAS_PYMUPDF:
+        return None
+
     cache_dir = storage.get_pdf_cache_dir()
     sid = _safe_id(paper_id)
     pdf_path = cache_dir / f"{sid}.pdf"
@@ -90,6 +99,8 @@ async def download_pdf(url: str | None, paper_id: str, doi: str | None = None) -
 
 
 def _extract_markdown(pdf_path: Path, max_chars: int = MAX_TEXT_CHARS) -> str:
+    if not HAS_PYMUPDF:
+        return ""
     try:
         md = pymupdf4llm.to_markdown(str(pdf_path))
         if len(md) > max_chars:
@@ -125,7 +136,9 @@ async def _save_figure_bytes(img_bytes: bytes, paper_id: str, filename: str) -> 
 
 
 def _render_first_page_sync(pdf_path: Path, paper_id: str) -> tuple[bytes, str] | None:
-    """Render the first page of a PDF as PNG bytes. Returns (bytes, filename) or None."""
+    """Render the first page of a PDF as PNG bytes."""
+    if not HAS_PYMUPDF:
+        return None
     try:
         doc = fitz.open(str(pdf_path))
         if len(doc) == 0:
@@ -155,6 +168,8 @@ async def _render_first_page(pdf_path: Path, paper_id: str) -> str | None:
 
 def _extract_figures_sync(pdf_path: Path, paper_id: str) -> list[tuple[bytes, str]]:
     """Extract figures from PDF, returning list of (bytes, filename)."""
+    if not HAS_PYMUPDF:
+        return []
     figures: list[tuple[bytes, str]] = []
     try:
         doc = fitz.open(str(pdf_path))
@@ -299,6 +314,8 @@ async def _try_unpaywall_pdf(
     sid: str, paper_id: str,
 ) -> list[str]:
     """Use Unpaywall to find an open access PDF, then render the first page."""
+    if not HAS_PYMUPDF:
+        return []
     try:
         resp = await client.get(
             f"https://api.unpaywall.org/v2/{doi_bare}",
