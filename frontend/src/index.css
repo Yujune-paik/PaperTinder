@@ -1138,6 +1138,22 @@ body {
   font-size: 0.75rem;
   color: var(--text-dim);
 }
+.export-nlm-header {
+  margin-bottom: 12px;
+}
+.export-nlm-desc {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.export-nlm-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.export-nlm-actions .btn {
+  justify-content: center;
+}
 
 /* === Completion Screen === */
 .completion-screen {

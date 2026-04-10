@@ -318,6 +318,7 @@ export default function MobileApp() {
           <MobileSaved
             items={readingList}
             onRemove={handleRemove}
+            onExport={() => setShowExport(true)}
           />
         )}
         {activeTab === "progress" && (

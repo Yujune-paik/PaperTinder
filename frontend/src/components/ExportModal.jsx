@@ -14,13 +14,22 @@ const SERVICES = {
     description: "Scrapboxフォーマットのテキストをクリップボードにコピー",
     requiresConfig: false,
   },
+  notebooklm_share: {
+    label: "NotebookLM に共有",
+    icon: "\u{1F4E4}",
+    description: "論文セッション文書を生成し、共有シートからNotebookLMへ送信",
+    requiresConfig: false,
+  },
 };
+
+const canNativeShare = typeof navigator !== "undefined" && !!navigator.share;
 
 export default function ExportModal({ onClose }) {
   const [serviceStatus, setServiceStatus] = useState({});
   const [selectedService, setSelectedService] = useState(null);
   const [phase, setPhase] = useState("select");
   const [exportText, setExportText] = useState("");
+  const [exportTitle, setExportTitle] = useState("");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -36,6 +45,8 @@ export default function ExportModal({ onClose }) {
     setSelectedService(key);
     if (key === "scrapbox_copy") {
       handleScrapboxCopy();
+    } else if (key === "notebooklm_share") {
+      handleNotebookLMShare();
     } else {
       setPhase("confirm");
     }
@@ -57,6 +68,90 @@ export default function ExportModal({ onClose }) {
     }
   };
 
+  const handleNotebookLMShare = async () => {
+    setPhase("loading");
+    setLoading(true);
+    try {
+      const res = await fetch("/api/export/notebooklm-doc");
+      const data = await res.json();
+      const text = data.text || "";
+      const title = data.title || "論文セッション";
+      setExportText(text);
+      setExportTitle(title);
+
+      if (canNativeShare) {
+        const file = new File(
+          [text],
+          `${title}.md`,
+          { type: "text/markdown" }
+        );
+        const canShareFile =
+          typeof navigator.canShare === "function" &&
+          navigator.canShare({ files: [file] });
+
+        try {
+          if (canShareFile) {
+            await navigator.share({ title, files: [file] });
+          } else {
+            await navigator.share({ title, text });
+          }
+          setResult({
+            status: "ok",
+            message: "共有シートから送信しました。",
+          });
+          setPhase("result");
+          return;
+        } catch (err) {
+          if (err.name === "AbortError") {
+            setPhase("notebooklm_preview");
+            return;
+          }
+        }
+      }
+      setPhase("notebooklm_preview");
+    } catch {
+      setExportText("ドキュメント生成に失敗しました。");
+      setPhase("notebooklm_preview");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRetryShare = async () => {
+    if (!canNativeShare) return;
+    const title = exportTitle || "論文セッション";
+    const file = new File(
+      [exportText],
+      `${title}.md`,
+      { type: "text/markdown" }
+    );
+    const canShareFile =
+      typeof navigator.canShare === "function" &&
+      navigator.canShare({ files: [file] });
+    try {
+      if (canShareFile) {
+        await navigator.share({ title, files: [file] });
+      } else {
+        await navigator.share({ title, text: exportText });
+      }
+      setResult({ status: "ok", message: "共有シートから送信しました。" });
+      setPhase("result");
+    } catch {
+      /* user cancelled */
+    }
+  };
+
+  const handleDownload = () => {
+    const title = exportTitle || "論文セッション";
+    const blob = new Blob([exportText], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${title}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleExport = async () => {
     setPhase("loading");
     setLoading(true);
@@ -64,8 +159,6 @@ export default function ExportModal({ onClose }) {
       let res;
       if (selectedService === "scrapbox_push") {
         res = await fetch("/api/export/scrapbox/push", { method: "POST" });
-      } else if (selectedService === "notebooklm") {
-        res = await fetch("/api/export/notebooklm", { method: "POST" });
       }
       const data = await res.json();
       setResult(data);
@@ -177,6 +270,43 @@ export default function ExportModal({ onClose }) {
     </>
   );
 
+  const renderNotebookLMPreview = () => (
+    <>
+      <div className="export-nlm-header">
+        <p className="export-nlm-desc">
+          NotebookLM用に最適化されたドキュメントが生成されました。
+          共有シートからNotebookLMへ直接送信できます。
+        </p>
+      </div>
+      <textarea
+        className="export-textarea"
+        value={exportText}
+        readOnly
+        rows={12}
+      />
+      <div className="modal-footer export-nlm-actions">
+        {canNativeShare && (
+          <button className="btn btn-primary" onClick={handleRetryShare}>
+            &#128228; 共有シートを開く
+          </button>
+        )}
+        <button
+          className={`btn ${copied ? "btn-success" : "btn-ghost"}`}
+          onClick={handleCopy}
+        >
+          {copied ? "\u2713 コピー済み" : "\u{1F4CB} テキストをコピー"}
+        </button>
+        <button className="btn btn-ghost" onClick={handleDownload}>
+          &#128229; ファイルをダウンロード
+        </button>
+        <p className="export-hint">
+          iOSの共有シートから「NotebookLM」を選択してください。
+          表示されない場合はコピーまたはダウンロードしてNotebookLMに貼り付けてください。
+        </p>
+      </div>
+    </>
+  );
+
   const renderResult = () => {
     if (!result) return null;
     const isOk = result.status === "ok" || result.status === "partial";
@@ -247,6 +377,7 @@ export default function ExportModal({ onClose }) {
             {phase === "confirm" && "確認"}
             {phase === "loading" && "エクスポート中"}
             {phase === "copy" && "Scrapbox テキスト"}
+            {phase === "notebooklm_preview" && "NotebookLM ドキュメント"}
             {phase === "result" && "結果"}
           </h2>
           <button className="modal-close" onClick={onClose}>
@@ -267,6 +398,7 @@ export default function ExportModal({ onClose }) {
               {phase === "confirm" && renderConfirm()}
               {phase === "loading" && renderLoading()}
               {phase === "copy" && renderCopy()}
+              {phase === "notebooklm_preview" && renderNotebookLMPreview()}
               {phase === "result" && renderResult()}
             </motion.div>
           </AnimatePresence>

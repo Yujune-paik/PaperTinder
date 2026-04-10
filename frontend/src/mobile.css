@@ -402,7 +402,8 @@
   flex-direction: column;
   align-items: center;
   height: 100%;
-  padding: 4px 10px;
+  padding: 10px;
+  padding-top: calc(56px + env(safe-area-inset-top, 0px));
   padding-bottom: max(10px, env(safe-area-inset-bottom, 10px));
   gap: 0;
   position: relative;
@@ -1042,10 +1043,36 @@
   font-weight: 700;
 }
 
+.m-saved-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 .m-saved-count {
   font-size: 0.8rem;
   color: var(--text-dim);
   font-weight: 600;
+}
+.m-export-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-size: 1.1rem;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: all 0.15s;
+}
+.m-export-btn:active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  transform: scale(0.92);
 }
 
 .m-saved-empty {
@@ -1358,4 +1385,23 @@
 }
 .m-app .export-result {
   padding: 16px 0;
+}
+.m-app .export-nlm-header {
+  margin-bottom: 12px;
+}
+.m-app .export-nlm-desc {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.m-app .export-nlm-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+}
+.m-app .export-nlm-actions .btn {
+  width: 100%;
+  justify-content: center;
+  min-height: 44px;
 }

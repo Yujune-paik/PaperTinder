@@ -20,6 +20,7 @@ from src.models import PaperMeta, ProgressData, ReadingListItem, SearchRequest
 from src.services import pdf_processor, semantic_scholar, summarizer
 from src.services import storage
 from src.services import scrapbox as scrapbox_exporter
+from src.services import notebooklm as notebooklm_service
 
 SSE_HEADERS = {
     "Cache-Control": "no-cache",
@@ -108,6 +109,14 @@ def _summary_event_stream(meta: PaperMeta):
     async def _gen():
         yield f"data: {json.dumps({'type': 'connected'})}\n\n"
         try:
+            # ── Fast path: return cached summary immediately ──
+            cached = storage.load_summary(meta.paper_id)
+            if cached and any(v for v in cached.values()):
+                logger.info(f"[stream] Cache hit: {meta.paper_id}")
+                yield f"data: {json.dumps({'type': 'summary', 'data': cached})}\n\n"
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                return
+
             doi = meta.doi
             if not doi and meta.semantic_scholar_url and "semanticscholar.org/paper/" in meta.semantic_scholar_url:
                 doi_suffix = meta.semantic_scholar_url.split("semanticscholar.org/paper/")[-1]
@@ -116,7 +125,7 @@ def _summary_event_stream(meta: PaperMeta):
 
             logger.info(f"[stream] Start: {meta.paper_id} pdf_url={bool(meta.pdf_url)} doi={bool(doi)}")
 
-            figure_urls = []
+            figure_urls: list[str] = []
             md_text = ""
 
             processed = await pdf_processor.process_pdf(meta.pdf_url, meta.paper_id, doi)
@@ -341,7 +350,8 @@ async def export_status():
     """Return which export services are configured."""
     return {
         "scrapbox": scrapbox_exporter.is_configured(),
-        "notebooklm": False,
+        "notebooklm": notebooklm_service.is_configured(),
+        "notebooklm_doc": True,
     }
 
 
@@ -381,6 +391,23 @@ async def push_scrapbox():
     except Exception as e:
         logger.exception("Scrapbox push failed")
         return {"status": "error", "message": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Export: NotebookLM document
+# ---------------------------------------------------------------------------
+
+@app.get("/api/export/notebooklm-doc")
+async def export_notebooklm_doc():
+    """Generate a Markdown document optimised for NotebookLM ingestion."""
+    items = _load_reading_list()
+    if not items:
+        return {"text": "保存した論文がありません。", "title": ""}
+
+    date_str, papers, summaries_map = _collect_export_data()
+    title = f"論文セッション {date_str}"
+    text = notebooklm_service.build_session_document(date_str, papers, summaries_map)
+    return {"text": text, "title": title}
 
 
 # ---------------------------------------------------------------------------

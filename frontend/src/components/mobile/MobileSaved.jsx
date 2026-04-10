@@ -1,11 +1,18 @@
 import { motion, AnimatePresence } from "framer-motion";
 
-export default function MobileSaved({ items, onRemove }) {
+export default function MobileSaved({ items, onRemove, onExport }) {
   return (
     <div className="m-saved">
       <div className="m-saved-header">
         <h2>&#128278; 保存リスト</h2>
-        <span className="m-saved-count">{items.length}件</span>
+        <div className="m-saved-header-right">
+          <span className="m-saved-count">{items.length}件</span>
+          {items.length > 0 && (
+            <button className="m-export-btn" onClick={onExport} title="エクスポート">
+              &#128228;
+            </button>
+          )}
+        </div>
       </div>
 
       {items.length === 0 ? (
