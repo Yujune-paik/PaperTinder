@@ -1,18 +1,32 @@
 import { motion, AnimatePresence } from "framer-motion";
 
+const SHARE_ACTIONS = [
+  {
+    key: "notebooklm_share",
+    icon: "\u{1F4E4}",
+    label: "NotebookLM に共有",
+    desc: "論文セッション文書をNotebookLMへ送信",
+  },
+  {
+    key: "scrapbox_copy",
+    icon: "\u{1F4CB}",
+    label: "Scrapbox テキストをコピー",
+    desc: "Scrapboxフォーマットでクリップボードにコピー",
+  },
+  {
+    key: "scrapbox_push",
+    icon: "\u{1F4DD}",
+    label: "Scrapbox に直接投稿",
+    desc: "Scrapboxプロジェクトに直接インポート",
+  },
+];
+
 export default function MobileSaved({ items, onRemove, onExport }) {
   return (
     <div className="m-saved">
       <div className="m-saved-header">
         <h2>&#128278; 保存リスト</h2>
-        <div className="m-saved-header-right">
-          <span className="m-saved-count">{items.length}件</span>
-          {items.length > 0 && (
-            <button className="m-export-btn" onClick={onExport} title="エクスポート">
-              &#128228;
-            </button>
-          )}
-        </div>
+        <span className="m-saved-count">{items.length}件</span>
       </div>
 
       {items.length === 0 ? (
@@ -51,6 +65,26 @@ export default function MobileSaved({ items, onRemove, onExport }) {
           </AnimatePresence>
         </ul>
       )}
+
+      <div className="m-saved-share">
+        <div className="m-saved-share-label">共有・エクスポート</div>
+        <div className="m-saved-share-actions">
+          {SHARE_ACTIONS.map((action) => (
+            <button
+              key={action.key}
+              className="m-saved-share-btn"
+              onClick={() => onExport(action.key)}
+              disabled={items.length === 0}
+            >
+              <span className="m-saved-share-btn-icon">{action.icon}</span>
+              <div className="m-saved-share-btn-text">
+                <span className="m-saved-share-btn-label">{action.label}</span>
+                <span className="m-saved-share-btn-desc">{action.desc}</span>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

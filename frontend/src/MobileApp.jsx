@@ -21,6 +21,7 @@ export default function MobileApp() {
   const [seenIds, setSeenIds] = useState(new Set());
   const [searchProgress, setSearchProgress] = useState(null);
   const [showExport, setShowExport] = useState(false);
+  const [exportService, setExportService] = useState(null);
   const abortRef = useRef(null);
   const prefetcherRef = useRef(null);
   if (!prefetcherRef.current) {
@@ -326,7 +327,10 @@ export default function MobileApp() {
           <MobileSaved
             items={readingList}
             onRemove={handleRemove}
-            onExport={() => setShowExport(true)}
+            onExport={(serviceKey) => {
+              setExportService(serviceKey || null);
+              setShowExport(true);
+            }}
           />
         )}
         {activeTab === "progress" && (
@@ -337,7 +341,15 @@ export default function MobileApp() {
         )}
       </main>
 
-      {showExport && <ExportModal onClose={() => setShowExport(false)} />}
+      {showExport && (
+        <ExportModal
+          onClose={() => {
+            setShowExport(false);
+            setExportService(null);
+          }}
+          initialService={exportService}
+        />
+      )}
     </div>
   );
 }

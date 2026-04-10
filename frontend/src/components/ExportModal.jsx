@@ -24,7 +24,7 @@ const SERVICES = {
 
 const canNativeShare = typeof navigator !== "undefined" && !!navigator.share;
 
-export default function ExportModal({ onClose }) {
+export default function ExportModal({ onClose, initialService }) {
   const [serviceStatus, setServiceStatus] = useState({});
   const [selectedService, setSelectedService] = useState(null);
   const [phase, setPhase] = useState("select");
@@ -39,6 +39,12 @@ export default function ExportModal({ onClose }) {
       .then((r) => r.json())
       .then((data) => setServiceStatus(data))
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (initialService) {
+      handleSelectService(initialService);
+    }
   }, []);
 
   const handleSelectService = (key) => {
