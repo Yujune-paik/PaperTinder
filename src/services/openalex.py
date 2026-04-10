@@ -134,11 +134,10 @@ def _parse_work(work: dict) -> PaperMeta | None:
 
         oa_info = work.get("open_access") or {}
 
-        sem_scholar_url = ""
         if doi:
-            sem_scholar_url = f"https://www.semanticscholar.org/paper/{doi.replace('https://doi.org/', '')}"
+            paper_url = doi if doi.startswith("http") else f"https://doi.org/{doi}"
         else:
-            sem_scholar_url = f"https://openalex.org/{paper_id}"
+            paper_url = f"https://openalex.org/{paper_id}"
 
         return PaperMeta(
             paper_id=paper_id,
@@ -149,7 +148,7 @@ def _parse_work(work: dict) -> PaperMeta | None:
             abstract=abstract,
             doi=doi or None,
             pdf_url=pdf_url,
-            semantic_scholar_url=sem_scholar_url,
+            semantic_scholar_url=paper_url,
             citation_count=work.get("cited_by_count") or 0,
             open_access=bool(oa_info.get("is_oa")),
         )

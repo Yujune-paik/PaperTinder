@@ -1,12 +1,18 @@
 /**
  * Centralized summary prefetch manager.
- * Processes paper summaries with limited concurrency so the server
- * is not overwhelmed, and starts fetching during the search phase
- * so cards already have data when they appear.
+ *
+ * Key design decisions:
+ *  - LIFO queue (pop) so the papers the user sees first get processed first.
+ *  - Deferred queue flush: enqueue() batches items and flushes via microtask,
+ *    ensuring a whole batch lands before the first 3 slots are claimed.
+ *  - Per-fetch timeout (90s) prevents hung connections from permanently
+ *    blocking concurrency slots.
+ *  - Concurrency = 3 to avoid overwhelming the serverless backend.
  */
 
 const CONCURRENCY = 3;
 const CHUNK_THROTTLE_MS = 250;
+const FETCH_TIMEOUT_MS = 90_000;
 
 export class SummaryPrefetcher {
   constructor() {
@@ -16,6 +22,7 @@ export class SummaryPrefetcher {
     this._listeners = new Map();
     this._abortControllers = new Map();
     this._chunkTimers = new Map();
+    this._flushScheduled = false;
   }
 
   getEntry(paperId) {
@@ -49,7 +56,16 @@ export class SummaryPrefetcher {
       error: false,
     });
     this._queue.push(paper);
-    this._processQueue();
+    this._scheduleFlush();
+  }
+
+  _scheduleFlush() {
+    if (this._flushScheduled) return;
+    this._flushScheduled = true;
+    Promise.resolve().then(() => {
+      this._flushScheduled = false;
+      this._processQueue();
+    });
   }
 
   _notify(paperId) {
@@ -89,6 +105,8 @@ export class SummaryPrefetcher {
     const ac = new AbortController();
     this._abortControllers.set(pid, ac);
 
+    const timeout = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS);
+
     try {
       let res;
       try {
@@ -114,48 +132,45 @@ export class SummaryPrefetcher {
       let buffer = "";
       let fullText = "";
 
-      const pump = async () => {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
 
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            try {
-              const data = JSON.parse(line.slice(6));
-              const entry = this._cache.get(pid);
-              if (!entry) continue;
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            const entry = this._cache.get(pid);
+            if (!entry) continue;
 
-              if (data.type === "figures") {
-                entry.figures = data.urls || [];
-                this._notify(pid);
-              } else if (data.type === "chunk") {
-                fullText += data.text;
-                entry.streamText = fullText;
-                this._notifyThrottled(pid);
-              } else if (data.type === "summary") {
-                entry.summary = data.data;
-                entry.loading = false;
-                this._notify(pid);
-              } else if (data.type === "done") {
-                entry.loading = false;
-                this._notify(pid);
-              } else if (data.type === "error") {
-                entry.loading = false;
-                entry.error = true;
-                this._notify(pid);
-              }
-            } catch {
-              /* ignore parse errors */
+            if (data.type === "figures") {
+              entry.figures = data.urls || [];
+              this._notify(pid);
+            } else if (data.type === "chunk") {
+              fullText += data.text;
+              entry.streamText = fullText;
+              this._notifyThrottled(pid);
+            } else if (data.type === "summary") {
+              entry.summary = data.data;
+              entry.loading = false;
+              this._notify(pid);
+            } else if (data.type === "done") {
+              entry.loading = false;
+              this._notify(pid);
+            } else if (data.type === "error") {
+              entry.loading = false;
+              entry.error = true;
+              this._notify(pid);
             }
+          } catch {
+            /* ignore parse errors */
           }
         }
-      };
-      await pump();
+      }
 
       const entry = this._cache.get(pid);
       if (entry && entry.loading) {
@@ -164,7 +179,15 @@ export class SummaryPrefetcher {
         this._notify(pid);
       }
     } catch (e) {
-      if (e.name === "AbortError") return;
+      if (e.name === "AbortError") {
+        const entry = this._cache.get(pid);
+        if (entry && entry.loading) {
+          entry.loading = false;
+          entry.error = true;
+          this._notify(pid);
+        }
+        return;
+      }
       const entry = this._cache.get(pid);
       if (entry) {
         entry.loading = false;
@@ -172,6 +195,7 @@ export class SummaryPrefetcher {
         this._notify(pid);
       }
     } finally {
+      clearTimeout(timeout);
       this._abortControllers.delete(pid);
     }
   }

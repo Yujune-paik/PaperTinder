@@ -121,10 +121,8 @@ def _summary_event_stream(meta: PaperMeta):
                 return
 
             doi = meta.doi
-            if not doi and meta.semantic_scholar_url and "semanticscholar.org/paper/" in meta.semantic_scholar_url:
-                doi_suffix = meta.semantic_scholar_url.split("semanticscholar.org/paper/")[-1]
-                if doi_suffix and "/" in doi_suffix:
-                    doi = f"https://doi.org/{doi_suffix}"
+            if not doi and meta.semantic_scholar_url and "doi.org/" in meta.semantic_scholar_url:
+                doi = meta.semantic_scholar_url
 
             logger.info(f"[stream] Start: {meta.paper_id} pdf_url={bool(meta.pdf_url)} doi={bool(doi)}")
 
