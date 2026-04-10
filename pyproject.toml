@@ -26,5 +26,5 @@ local = [
     "markitdown[pdf]>=0.1.0",
 ]
 notebooklm = [
-    "notebooklm-py[browser]>=0.5.0",
+    "notebooklm-py[browser]>=0.3.0",
 ]
