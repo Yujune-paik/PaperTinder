@@ -15,9 +15,9 @@ const SERVICES = {
     requiresConfig: false,
   },
   notebooklm_share: {
-    label: "NotebookLM に共有",
-    icon: "\u{1F4E4}",
-    description: "論文セッション文書を生成し、共有シートからNotebookLMへ送信",
+    label: "NotebookLM 用 Markdown",
+    icon: "\u{1F4D3}",
+    description: "論文セッション文書をMarkdownファイルとしてダウンロード",
     requiresConfig: false,
   },
 };
@@ -80,40 +80,8 @@ export default function ExportModal({ onClose, initialService }) {
     try {
       const res = await fetch("/api/export/notebooklm-doc");
       const data = await res.json();
-      const text = data.text || "";
-      const title = data.title || "論文セッション";
-      setExportText(text);
-      setExportTitle(title);
-
-      if (canNativeShare) {
-        const file = new File(
-          [text],
-          `${title}.md`,
-          { type: "text/markdown" }
-        );
-        const canShareFile =
-          typeof navigator.canShare === "function" &&
-          navigator.canShare({ files: [file] });
-
-        try {
-          if (canShareFile) {
-            await navigator.share({ title, files: [file] });
-          } else {
-            await navigator.share({ title, text });
-          }
-          setResult({
-            status: "ok",
-            message: "共有シートから送信しました。",
-          });
-          setPhase("result");
-          return;
-        } catch (err) {
-          if (err.name === "AbortError") {
-            setPhase("notebooklm_preview");
-            return;
-          }
-        }
-      }
+      setExportText(data.text || "");
+      setExportTitle(data.title || "論文セッション");
       setPhase("notebooklm_preview");
     } catch {
       setExportText("ドキュメント生成に失敗しました。");
@@ -283,8 +251,7 @@ export default function ExportModal({ onClose, initialService }) {
     <>
       <div className="export-nlm-header">
         <p className="export-nlm-desc">
-          NotebookLM用に最適化されたドキュメントが生成されました。
-          共有シートからNotebookLMへ直接送信できます。
+          NotebookLM用のMarkdownドキュメントが生成されました。
         </p>
       </div>
       <textarea
@@ -294,23 +261,22 @@ export default function ExportModal({ onClose, initialService }) {
         rows={12}
       />
       <div className="modal-footer export-nlm-actions">
-        {canNativeShare && (
-          <button className="btn btn-primary" onClick={handleRetryShare}>
-            &#128228; 共有シートを開く
-          </button>
-        )}
+        <button className="btn btn-primary" onClick={handleDownload}>
+          &#128229; Markdownファイルをダウンロード
+        </button>
         <button
           className={`btn ${copied ? "btn-success" : "btn-ghost"}`}
           onClick={handleCopy}
         >
           {copied ? "\u2713 コピー済み" : "\u{1F4CB} テキストをコピー"}
         </button>
-        <button className="btn btn-ghost" onClick={handleDownload}>
-          &#128229; ファイルをダウンロード
-        </button>
+        {canNativeShare && (
+          <button className="btn btn-ghost" onClick={handleRetryShare}>
+            &#128228; 共有シートを開く
+          </button>
+        )}
         <p className="export-hint">
-          iOSの共有シートから「NotebookLM」を選択してください。
-          表示されない場合はコピーまたはダウンロードしてNotebookLMに貼り付けてください。
+          ダウンロードした .md ファイルを NotebookLM の「ソースを追加」からアップロードしてください。
         </p>
       </div>
     </>
