@@ -16,7 +16,8 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _redis_client = None
-_is_vercel = bool(os.environ.get("UPSTASH_REDIS_REST_URL"))
+_is_vercel = bool(os.environ.get("VERCEL") or os.environ.get("UPSTASH_REDIS_REST_URL"))
+_has_redis = bool(os.environ.get("UPSTASH_REDIS_REST_URL"))
 _blob_token = os.environ.get("BLOB_READ_WRITE_TOKEN", "")
 
 DATA_DIR = Path("data")
@@ -26,20 +27,29 @@ PROGRESS_DIR = DATA_DIR / "progress"
 FIGURES_DIR = DATA_DIR / "figures"
 
 
+TMP_DATA_DIR = Path("/tmp/data")
+TMP_READING_LIST = TMP_DATA_DIR / "reading_list.json"
+TMP_PAPERS_CACHE = TMP_DATA_DIR / "papers_cache.json"
+TMP_PROGRESS_DIR = TMP_DATA_DIR / "progress"
+
+
 def _get_redis():
     global _redis_client
     if _redis_client is None:
         from upstash_redis import Redis
         _redis_client = Redis(
-            url=os.environ["UPSTASH_REDIS_REST_URL"],
-            token=os.environ["UPSTASH_REDIS_REST_TOKEN"],
+            url=os.environ["UPSTASH_REDIS_REST_URL"].strip(),
+            token=os.environ["UPSTASH_REDIS_REST_TOKEN"].strip(),
         )
     return _redis_client
 
 
 def init_local_dirs():
-    """Create local data directories for file-based storage."""
-    if not _is_vercel:
+    """Create data directories for storage."""
+    if _is_vercel:
+        for d in [TMP_DATA_DIR, TMP_PROGRESS_DIR]:
+            d.mkdir(parents=True, exist_ok=True)
+    else:
         for d in [DATA_DIR, PROGRESS_DIR, FIGURES_DIR]:
             d.mkdir(parents=True, exist_ok=True)
 
@@ -48,26 +58,38 @@ def init_local_dirs():
 # Reading List
 # ---------------------------------------------------------------------------
 
+def _read_json_file(path: Path, default=None):
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return default
+    return default
+
+
+def _write_json_file(path: Path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def load_reading_list_raw() -> list[dict]:
-    if _is_vercel:
+    if _has_redis:
         data = _get_redis().get("reading_list")
         if data is None:
             return []
         if isinstance(data, str):
             return json.loads(data)
         return data
-    if READING_LIST_PATH.exists():
-        return json.loads(READING_LIST_PATH.read_text(encoding="utf-8"))
-    return []
+    path = TMP_READING_LIST if _is_vercel else READING_LIST_PATH
+    return _read_json_file(path, [])
 
 
 def save_reading_list_raw(items: list[dict]):
-    if _is_vercel:
+    if _has_redis:
         _get_redis().set("reading_list", json.dumps(items, ensure_ascii=False))
     else:
-        READING_LIST_PATH.write_text(
-            json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        path = TMP_READING_LIST if _is_vercel else READING_LIST_PATH
+        _write_json_file(path, items)
 
 
 # ---------------------------------------------------------------------------
@@ -75,31 +97,26 @@ def save_reading_list_raw(items: list[dict]):
 # ---------------------------------------------------------------------------
 
 def load_papers_cache_raw() -> dict[str, dict]:
-    if _is_vercel:
+    if _has_redis:
         data = _get_redis().get("papers_cache")
         if data is None:
             return {}
         if isinstance(data, str):
             return json.loads(data)
         return data
-    if PAPERS_CACHE_PATH.exists():
-        try:
-            return json.loads(PAPERS_CACHE_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
-    return {}
+    path = TMP_PAPERS_CACHE if _is_vercel else PAPERS_CACHE_PATH
+    return _read_json_file(path, {})
 
 
 def save_papers_cache_raw(data: dict[str, dict]):
-    if _is_vercel:
+    if _has_redis:
         _get_redis().set("papers_cache", json.dumps(data, ensure_ascii=False))
     else:
+        path = TMP_PAPERS_CACHE if _is_vercel else PAPERS_CACHE_PATH
         try:
-            PAPERS_CACHE_PATH.write_text(
-                json.dumps(data, ensure_ascii=False), encoding="utf-8"
-            )
+            _write_json_file(path, data)
         except Exception:
-            logger.warning("Failed to save papers cache to disk")
+            logger.warning("Failed to save papers cache")
 
 
 # ---------------------------------------------------------------------------
@@ -108,32 +125,30 @@ def save_papers_cache_raw(data: dict[str, dict]):
 
 def load_progress_raw(venue: str, year: int) -> dict | None:
     key = f"{venue.lower().replace(' ', '_')}_{year}"
-    if _is_vercel:
+    if _has_redis:
         data = _get_redis().get(f"progress:{key}")
         if data is None:
             return None
         if isinstance(data, str):
             return json.loads(data)
         return data
-    path = PROGRESS_DIR / f"{key}.json"
-    if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
-    return None
+    prog_dir = TMP_PROGRESS_DIR if _is_vercel else PROGRESS_DIR
+    path = prog_dir / f"{key}.json"
+    return _read_json_file(path)
 
 
 def save_progress_raw(progress_data: dict, venue: str, year: int):
     key = f"{venue.lower().replace(' ', '_')}_{year}"
-    if _is_vercel:
+    if _has_redis:
         _get_redis().set(f"progress:{key}", json.dumps(progress_data, ensure_ascii=False))
     else:
-        path = PROGRESS_DIR / f"{key}.json"
-        path.write_text(
-            json.dumps(progress_data, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        prog_dir = TMP_PROGRESS_DIR if _is_vercel else PROGRESS_DIR
+        path = prog_dir / f"{key}.json"
+        _write_json_file(path, progress_data)
 
 
 def load_all_progress_raw() -> list[dict]:
-    if _is_vercel:
+    if _has_redis:
         redis = _get_redis()
         keys = redis.keys("progress:*")
         results = []
@@ -145,11 +160,11 @@ def load_all_progress_raw() -> list[dict]:
                 else:
                     results.append(data)
         return results
+    prog_dir = TMP_PROGRESS_DIR if _is_vercel else PROGRESS_DIR
     results = []
-    if PROGRESS_DIR.exists():
-        for path in PROGRESS_DIR.glob("*.json"):
-            data = json.loads(path.read_text(encoding="utf-8"))
-            results.append(data)
+    if prog_dir.exists():
+        for path in prog_dir.glob("*.json"):
+            results.append(_read_json_file(path, {}))
     return results
 
 
@@ -209,6 +224,70 @@ def get_figure_url(paper_id_safe: str, filename: str) -> str:
     if _is_vercel:
         return f"/api/figures/{paper_id_safe}/{filename}"
     return f"/figures/{paper_id_safe}/{filename}"
+
+
+# ---------------------------------------------------------------------------
+# Summaries Cache
+# ---------------------------------------------------------------------------
+
+SUMMARIES_CACHE_PATH = DATA_DIR / "summaries_cache.json"
+TMP_SUMMARIES_CACHE = TMP_DATA_DIR / "summaries_cache.json"
+
+
+def _safe_redis_key(paper_id: str) -> str:
+    return f"summary:{paper_id.replace('/', '_')}"
+
+
+def save_summary(paper_id: str, summary: dict):
+    """Persist a single paper's parsed summary."""
+    if _has_redis:
+        _get_redis().set(
+            _safe_redis_key(paper_id),
+            json.dumps(summary, ensure_ascii=False),
+        )
+        return
+
+    path = TMP_SUMMARIES_CACHE if _is_vercel else SUMMARIES_CACHE_PATH
+    cache = _read_json_file(path, {})
+    cache[paper_id] = summary
+    try:
+        _write_json_file(path, cache)
+    except Exception:
+        logger.warning("Failed to save summaries cache")
+
+
+def load_summary(paper_id: str) -> dict | None:
+    """Load a single paper's parsed summary."""
+    if _has_redis:
+        data = _get_redis().get(_safe_redis_key(paper_id))
+        if data is None:
+            return None
+        if isinstance(data, str):
+            return json.loads(data)
+        return data
+
+    path = TMP_SUMMARIES_CACHE if _is_vercel else SUMMARIES_CACHE_PATH
+    cache = _read_json_file(path, {})
+    return cache.get(paper_id)
+
+
+def load_all_summaries(paper_ids: list[str]) -> dict[str, dict]:
+    """Load summaries for multiple papers at once."""
+    if _has_redis:
+        redis = _get_redis()
+        result = {}
+        for pid in paper_ids:
+            data = redis.get(_safe_redis_key(pid))
+            if data is not None:
+                if isinstance(data, str):
+                    result[pid] = json.loads(data)
+                else:
+                    result[pid] = data
+        return result
+
+    path = TMP_SUMMARIES_CACHE if _is_vercel else SUMMARIES_CACHE_PATH
+    cache = _read_json_file(path, {})
+    return {pid: cache[pid] for pid in paper_ids if pid in cache}
 
 
 def is_vercel() -> bool:

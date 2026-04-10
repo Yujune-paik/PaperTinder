@@ -203,29 +203,16 @@ export default function MobileSwipe({
         })}
       </div>
 
-      <div className="m-swipe-controls">
-        <button
-          className="m-swipe-btn m-swipe-btn-left"
-          onClick={() => swipe("left")}
-          disabled={!canSwipe}
-        >
-          <span>&#10005;</span>
-          <small>Skip</small>
-        </button>
-        <div className="m-swipe-counter">
-          {papers.length > 0
-            ? `${papers.length - currentIndex - 1} / ${papers.length}`
-            : ""}
+      {papers.length > 0 && (
+        <div className="m-swipe-counter-bar">
+          <span className="m-swipe-counter-text">
+            {papers.length - currentIndex - 1} / {papers.length}
+          </span>
+          <span className="m-swipe-hint-text">
+            ← スキップ ｜ 保存 →
+          </span>
         </div>
-        <button
-          className="m-swipe-btn m-swipe-btn-right"
-          onClick={() => swipe("right")}
-          disabled={!canSwipe}
-        >
-          <span>&#10003;</span>
-          <small>Save</small>
-        </button>
-      </div>
+      )}
     </div>
   );
 }

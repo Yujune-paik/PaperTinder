@@ -19,6 +19,13 @@ from fastapi.staticfiles import StaticFiles
 from src.models import PaperMeta, ProgressData, ReadingListItem, SearchRequest
 from src.services import pdf_processor, semantic_scholar, summarizer
 from src.services import storage
+from src.services import scrapbox as scrapbox_exporter
+
+SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "X-Accel-Buffering": "no",
+    "Connection": "keep-alive",
+}
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -67,6 +74,8 @@ def _save_papers_cache():
 
 _load_papers_cache()
 
+if storage.is_vercel():
+    logger.info(f"Running on Vercel (redis={'yes' if storage._has_redis else 'no'}, blob={'yes' if storage._blob_token else 'no'})")
 if os.environ.get("OPENAI_API_KEY"):
     logger.info("OPENAI_API_KEY is set")
 else:
@@ -97,6 +106,7 @@ def _summary_event_stream(meta: PaperMeta):
     """Shared SSE generator for summary streaming."""
 
     async def _gen():
+        yield f"data: {json.dumps({'type': 'connected'})}\n\n"
         try:
             doi = meta.doi
             if not doi and meta.semantic_scholar_url and "semanticscholar.org/paper/" in meta.semantic_scholar_url:
@@ -106,14 +116,21 @@ def _summary_event_stream(meta: PaperMeta):
 
             logger.info(f"[stream] Start: {meta.paper_id} pdf_url={bool(meta.pdf_url)} doi={bool(doi)}")
 
+            figure_urls = []
+            md_text = ""
+
             processed = await pdf_processor.process_pdf(meta.pdf_url, meta.paper_id, doi)
-            figure_urls = processed.figure_paths
             md_text = processed.markdown_text
+            figure_urls = processed.figure_paths
             logger.info(f"[stream] PDF done: figures={len(figure_urls)} md_len={len(md_text)}")
 
             if not figure_urls and doi:
                 logger.info(f"[stream] Trying DOI thumbnail for {meta.paper_id}")
-                figure_urls = await pdf_processor.fetch_thumbnail(meta.paper_id, doi)
+                try:
+                    figure_urls = await pdf_processor.fetch_thumbnail(meta.paper_id, doi)
+                except Exception:
+                    logger.warning(f"[stream] Thumbnail fetch failed for {meta.paper_id}")
+                    figure_urls = []
 
             if figure_urls:
                 yield f"data: {json.dumps({'type': 'figures', 'urls': figure_urls})}\n\n"
@@ -125,6 +142,7 @@ def _summary_event_stream(meta: PaperMeta):
                 yield f"data: {json.dumps({'type': 'chunk', 'text': chunk})}\n\n"
 
             parsed = summarizer.parse_tier1_response(full_text)
+            storage.save_summary(meta.paper_id, parsed)
             yield f"data: {json.dumps({'type': 'summary', 'data': parsed})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
             logger.info(f"[stream] Done: {meta.paper_id}")
@@ -162,7 +180,7 @@ async def stream_search_papers(req: SearchRequest):
 
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +192,7 @@ async def stream_summary(paper_id: str):
     meta = _papers_cache.get(paper_id)
     if not meta:
         raise HTTPException(404, "Paper not in cache")
-    return StreamingResponse(_summary_event_stream(meta), media_type="text/event-stream")
+    return StreamingResponse(_summary_event_stream(meta), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 @app.post("/api/stream-inline")
@@ -185,7 +203,7 @@ async def stream_summary_inline(body: dict):
         raise HTTPException(400, "Invalid paper metadata")
     _papers_cache[meta.paper_id] = meta
     _save_papers_cache()
-    return StreamingResponse(_summary_event_stream(meta), media_type="text/event-stream")
+    return StreamingResponse(_summary_event_stream(meta), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +229,7 @@ async def stream_deep_summary(paper_id: str):
             yield f"data: {json.dumps({'type': 'chunk', 'text': chunk})}\n\n"
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 # ---------------------------------------------------------------------------
@@ -281,45 +299,88 @@ async def mark_saved(venue: str, year: int, body: dict):
 
 
 # ---------------------------------------------------------------------------
-# Scrapbox Export
+# Export helpers
+# ---------------------------------------------------------------------------
+
+def _collect_export_data() -> tuple[str, list[dict], dict[str, dict]]:
+    """Gather papers + summaries for export, returning (date_str, papers, summaries)."""
+    items = _load_reading_list()
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    papers = []
+    paper_ids = [item.paper_id for item in items]
+
+    for item in items:
+        meta = _papers_cache.get(item.paper_id)
+        paper_dict = {
+            "paper_id": item.paper_id,
+            "title": item.title,
+            "venue": item.venue,
+            "year": item.year,
+        }
+        if meta:
+            paper_dict.update({
+                "authors": meta.authors,
+                "abstract": meta.abstract,
+                "doi": meta.doi,
+                "semantic_scholar_url": meta.semantic_scholar_url,
+            })
+
+        papers.append(paper_dict)
+
+    summaries_map = storage.load_all_summaries(paper_ids)
+    return date_str, papers, summaries_map
+
+
+# ---------------------------------------------------------------------------
+# Export: status
+# ---------------------------------------------------------------------------
+
+@app.get("/api/export/status")
+async def export_status():
+    """Return which export services are configured."""
+    return {
+        "scrapbox": scrapbox_exporter.is_configured(),
+        "notebooklm": False,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Export: Scrapbox
 # ---------------------------------------------------------------------------
 
 @app.get("/api/export/scrapbox")
 async def export_scrapbox():
+    """Generate Scrapbox import JSON (clipboard copy fallback)."""
     items = _load_reading_list()
     if not items:
-        return {"text": "保存した論文がありません。"}
+        return {"text": "保存した論文がありません。", "pages": []}
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    venues = list(set(item.venue or "Unknown" for item in items))
-    venue_tags = "".join(f"[{v}]" for v in venues)
+    date_str, papers, summaries_map = _collect_export_data()
+    page = scrapbox_exporter.build_daily_page(date_str, papers, summaries_map)
 
-    session_page = f"[論文セッション {now} {venue_tags}]\n"
-    session_page += "#paper-tinder #session\n\n"
-    session_page += f"今日スワイプ: {len(items)}本保存\n\n"
-    for item in items:
-        session_page += f" [{item.title}]\n"
+    text = "\n".join(page["lines"])
+    return {"text": text, "pages": [page]}
 
-    paper_pages = []
-    for item in items:
-        meta = _papers_cache.get(item.paper_id)
-        venue_tag = (item.venue or "Unknown").replace(" ", "")
-        year_str = str(item.year) if item.year else ""
-        page = f"[{item.title}]\n"
-        page += f"#paper #{venue_tag}{year_str} #paper-tinder\n\n"
 
-        if meta:
-            page += f"[* 論文情報]\n"
-            page += f"著者: {', '.join(meta.authors[:5])}\n"
-            page += f"リンク: [{meta.paper_id} {meta.semantic_scholar_url}]\n"
-            page += f"公開年: {meta.year or 'N/A'}\n"
-        else:
-            page += f"Paper ID: {item.paper_id}\n"
+@app.post("/api/export/scrapbox/push")
+async def push_scrapbox():
+    """Push the daily summary page directly to Scrapbox via import API."""
+    items = _load_reading_list()
+    if not items:
+        return {"status": "error", "message": "保存した論文がありません。"}
 
-        paper_pages.append(page)
+    if not scrapbox_exporter.is_configured():
+        return {"status": "error", "message": "Scrapbox未設定: SCRAPBOX_SID と SCRAPBOX_PROJECT を設定してください。"}
 
-    full_export = session_page + "\n\n---\n\n" + "\n\n---\n\n".join(paper_pages)
-    return {"text": full_export}
+    try:
+        date_str, papers, summaries_map = _collect_export_data()
+        page = scrapbox_exporter.build_daily_page(date_str, papers, summaries_map)
+        result = await scrapbox_exporter.push_to_scrapbox([page])
+        return result
+    except Exception as e:
+        logger.exception("Scrapbox push failed")
+        return {"status": "error", "message": str(e)}
 
 
 # ---------------------------------------------------------------------------

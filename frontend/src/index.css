@@ -975,6 +975,140 @@ body {
 }
 
 /* === Export Modal === */
+.export-services {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.export-service-btn {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s;
+}
+.export-service-btn:hover:not(.disabled) {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+.export-service-btn.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.export-service-icon {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+.export-service-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.export-service-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.export-service-desc {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+.export-service-arrow {
+  font-size: 1.4rem;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.export-service-badge {
+  font-size: 0.65rem;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: var(--bg-hover);
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.export-confirm {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+  padding: 16px 0;
+}
+.export-confirm-icon {
+  font-size: 2.5rem;
+}
+.export-confirm h3 {
+  font-size: 1rem;
+  font-weight: 700;
+}
+.export-confirm p {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  max-width: 400px;
+}
+.export-confirm-note {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  padding: 12px;
+  background: var(--bg-surface);
+  border-radius: var(--radius-sm);
+}
+.export-confirm-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.export-result {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+  padding: 24px 0;
+}
+.export-result-icon {
+  font-size: 2.5rem;
+}
+.export-result h3 {
+  font-size: 1rem;
+  font-weight: 700;
+}
+.export-result p {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+.export-result.error h3 {
+  color: var(--red);
+}
+.export-open-link {
+  margin-top: 8px;
+  text-decoration: none;
+  display: inline-block;
+}
+.export-errors {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  text-align: left;
+  padding: 12px;
+  background: var(--bg-surface);
+  border-radius: var(--radius-sm);
+  max-width: 100%;
+}
+.export-errors ul {
+  margin: 4px 0 0 16px;
+  padding: 0;
+}
+
 .export-textarea {
   width: 100%;
   min-height: 300px;

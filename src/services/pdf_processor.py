@@ -12,26 +12,59 @@ from src.services import storage
 
 logger = logging.getLogger(__name__)
 
+# ── pdfminer.six (pure-Python, works on Vercel) ───────────────────────
+_HAS_PDFMINER = False
 try:
-    import fitz
-    import pymupdf4llm
-    HAS_PYMUPDF = True
+    from pdfminer.high_level import extract_text as _pdfminer_extract  # type: ignore[import-untyped]
+    _HAS_PDFMINER = True
 except ImportError:
-    HAS_PYMUPDF = False
-    logger.info("PyMuPDF not available — PDF text extraction and figure rendering disabled")
+    logger.info("pdfminer.six not available")
+
+# ── MarkItDown (optional, heavier — local-only) ───────────────────────
+_HAS_MARKITDOWN = False
+try:
+    from markitdown import MarkItDown  # type: ignore[import-untyped]
+    _HAS_MARKITDOWN = True
+except ImportError:
+    logger.info("markitdown not available — will try pdfminer/PyMuPDF fallback")
+
+# ── pypdfium2 (pre-built wheel, works on Vercel — page rendering) ─────
+_HAS_PDFIUM = False
+try:
+    import pypdfium2 as pdfium  # type: ignore[import-untyped]
+    _HAS_PDFIUM = True
+except ImportError:
+    logger.info("pypdfium2 not available — PDF page rendering disabled")
+
+# ── PyMuPDF (C binary, local-only — used for figure extraction) ────────
+_HAS_PYMUPDF = False
+try:
+    import fitz  # type: ignore[import-untyped]
+    import pymupdf4llm  # type: ignore[import-untyped]
+    _HAS_PYMUPDF = True
+except ImportError:
+    logger.info("PyMuPDF not available — figure extraction disabled")
 
 MIN_FIGURE_SIZE = 200
-MAX_TEXT_CHARS = 12000
-PDF_PROCESS_TIMEOUT = 30  # seconds
+MAX_TEXT_CHARS = 60000
+PDF_PROCESS_TIMEOUT = 50
 
 
 def _safe_id(paper_id: str) -> str:
-    """Create a filesystem-safe identifier from a paper ID."""
     return re.sub(r'[\\/:*?"<>|]', "_", paper_id)
 
 
+_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/125.0.0.0 Safari/537.36"
+)
+UNPAYWALL_EMAIL = "papertinder@example.com"
+
+
+# ── PDF Download ───────────────────────────────────────────────────────
+
 async def _download_from_url(client: httpx.AsyncClient, url: str, pdf_path: Path) -> bool:
-    """Try downloading a PDF from a single URL. Returns True on success."""
     try:
         resp = await client.get(url)
         resp.raise_for_status()
@@ -54,7 +87,6 @@ async def _download_from_url(client: httpx.AsyncClient, url: str, pdf_path: Path
 
 
 async def _get_s2_oa_url(client: httpx.AsyncClient, doi: str | None) -> str | None:
-    """Ask Semantic Scholar for an open access PDF URL."""
     if not doi:
         return None
     doi_bare = doi.replace("https://doi.org/", "").replace("http://doi.org/", "")
@@ -73,7 +105,8 @@ async def _get_s2_oa_url(client: httpx.AsyncClient, doi: str | None) -> str | No
 
 
 async def download_pdf(url: str | None, paper_id: str, doi: str | None = None) -> Path | None:
-    if not HAS_PYMUPDF:
+    """Download a PDF. Works with pdfminer, MarkItDown, pypdfium2, or PyMuPDF."""
+    if not (_HAS_PDFMINER or _HAS_MARKITDOWN or _HAS_PDFIUM or _HAS_PYMUPDF):
         return None
 
     cache_dir = storage.get_pdf_cache_dir()
@@ -98,9 +131,24 @@ async def download_pdf(url: str | None, paper_id: str, doi: str | None = None) -
     return None
 
 
-def _extract_markdown(pdf_path: Path, max_chars: int = MAX_TEXT_CHARS) -> str:
-    if not HAS_PYMUPDF:
+# ── Text Extraction ────────────────────────────────────────────────────
+
+def _extract_markdown_markitdown(pdf_path: Path, max_chars: int = MAX_TEXT_CHARS) -> str:
+    """Extract markdown using MarkItDown (pure Python, works on Vercel)."""
+    try:
+        converter = MarkItDown(enable_plugins=False)
+        result = converter.convert(str(pdf_path))
+        md = result.text_content or ""
+        if len(md) > max_chars:
+            md = md[:max_chars] + "\n\n[... truncated ...]"
+        return md
+    except Exception:
+        logger.exception("MarkItDown conversion failed")
         return ""
+
+
+def _extract_markdown_pymupdf(pdf_path: Path, max_chars: int = MAX_TEXT_CHARS) -> str:
+    """Extract markdown using PyMuPDF (fallback, needs C binary)."""
     try:
         md = pymupdf4llm.to_markdown(str(pdf_path))
         if len(md) > max_chars:
@@ -122,8 +170,69 @@ def _extract_markdown(pdf_path: Path, max_chars: int = MAX_TEXT_CHARS) -> str:
             return ""
 
 
+def _extract_text_pdfminer(pdf_path: Path, max_chars: int = MAX_TEXT_CHARS) -> str:
+    """Extract text using pdfminer.six (pure Python, works on Vercel)."""
+    try:
+        text = _pdfminer_extract(str(pdf_path))
+        if len(text) > max_chars:
+            text = text[:max_chars] + "\n\n[... truncated ...]"
+        return text
+    except Exception:
+        logger.warning(f"pdfminer extraction failed: {pdf_path.name}")
+        return ""
+
+
+def _extract_text_pdfium(pdf_path: Path, max_chars: int = MAX_TEXT_CHARS) -> str:
+    """Extract text using pypdfium2 (pre-built wheel, works on Vercel)."""
+    try:
+        doc = pdfium.PdfDocument(str(pdf_path))
+        parts: list[str] = []
+        total = 0
+        for page in doc:
+            textpage = page.get_textpage()
+            page_text = textpage.get_text_bounded()
+            parts.append(page_text)
+            total += len(page_text)
+            textpage.close()
+            page.close()
+            if total > max_chars:
+                break
+        doc.close()
+        text = "\n\n".join(parts)
+        if len(text) > max_chars:
+            text = text[:max_chars] + "\n\n[... truncated ...]"
+        return text
+    except Exception:
+        logger.warning(f"pypdfium2 text extraction failed: {pdf_path.name}")
+        return ""
+
+
+def _extract_markdown(pdf_path: Path, max_chars: int = MAX_TEXT_CHARS) -> str:
+    """Extract text: try MarkItDown → pdfminer → pypdfium2 → PyMuPDF."""
+    if _HAS_MARKITDOWN:
+        text = _extract_markdown_markitdown(pdf_path, max_chars)
+        if text:
+            return text
+
+    if _HAS_PDFMINER:
+        text = _extract_text_pdfminer(pdf_path, max_chars)
+        if text:
+            return text
+
+    if _HAS_PDFIUM:
+        text = _extract_text_pdfium(pdf_path, max_chars)
+        if text:
+            return text
+
+    if _HAS_PYMUPDF:
+        return _extract_markdown_pymupdf(pdf_path, max_chars)
+
+    return ""
+
+
+# ── Page Rendering & Figure Extraction ─────────────────────────────────
+
 async def _save_figure_bytes(img_bytes: bytes, paper_id: str, filename: str) -> str:
-    """Save figure bytes and return the URL (Blob URL on Vercel, local path otherwise)."""
     sid = _safe_id(paper_id)
     if storage.is_vercel():
         url = await storage.upload_to_blob(img_bytes, f"figures/{sid}/{filename}")
@@ -135,40 +244,66 @@ async def _save_figure_bytes(img_bytes: bytes, paper_id: str, filename: str) -> 
     return f"/figures/{sid}/{filename}"
 
 
-def _render_first_page_sync(pdf_path: Path, paper_id: str) -> tuple[bytes, str] | None:
-    """Render the first page of a PDF as PNG bytes."""
-    if not HAS_PYMUPDF:
+def _render_first_page_pdfium(pdf_path: Path) -> bytes | None:
+    """Render the first page using pypdfium2 (works on Vercel)."""
+    try:
+        doc = pdfium.PdfDocument(str(pdf_path))
+        if len(doc) == 0:
+            return None
+        page = doc[0]
+        scale = 2
+        bitmap = page.render(scale=scale)
+        pil_image = bitmap.to_pil()
+        import io
+        buf = io.BytesIO()
+        pil_image.save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception:
+        logger.warning(f"pypdfium2 first-page render failed: {pdf_path.name}")
         return None
+
+
+def _render_first_page_pymupdf(pdf_path: Path) -> bytes | None:
+    """Render the first page using PyMuPDF (fallback)."""
     try:
         doc = fitz.open(str(pdf_path))
         if len(doc) == 0:
             doc.close()
             return None
         page = doc[0]
-        zoom = 1.5
-        mat = fitz.Matrix(zoom, zoom)
+        mat = fitz.Matrix(1.5, 1.5)
         pix = page.get_pixmap(matrix=mat)
         img_bytes = pix.tobytes("png")
         doc.close()
-        return (img_bytes, "page_0.png")
+        return img_bytes
     except Exception:
-        logger.warning(f"First-page render failed for {paper_id}")
+        logger.warning(f"PyMuPDF first-page render failed: {pdf_path.name}")
         return None
+
+
+def _render_first_page_sync(pdf_path: Path) -> bytes | None:
+    """Try pypdfium2 first, then PyMuPDF."""
+    if _HAS_PDFIUM:
+        result = _render_first_page_pdfium(pdf_path)
+        if result:
+            return result
+
+    if _HAS_PYMUPDF:
+        return _render_first_page_pymupdf(pdf_path)
+
+    return None
 
 
 async def _render_first_page(pdf_path: Path, paper_id: str) -> str | None:
-    """Render the first page and save it, returning the URL."""
     loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(None, _render_first_page_sync, pdf_path, paper_id)
-    if result is None:
+    img_bytes = await loop.run_in_executor(None, _render_first_page_sync, pdf_path)
+    if not img_bytes:
         return None
-    img_bytes, filename = result
-    return await _save_figure_bytes(img_bytes, paper_id, filename)
+    return await _save_figure_bytes(img_bytes, paper_id, "page_0.png")
 
 
 def _extract_figures_sync(pdf_path: Path, paper_id: str) -> list[tuple[bytes, str]]:
-    """Extract figures from PDF, returning list of (bytes, filename)."""
-    if not HAS_PYMUPDF:
+    if not _HAS_PYMUPDF:
         return []
     figures: list[tuple[bytes, str]] = []
     try:
@@ -201,7 +336,6 @@ def _extract_figures_sync(pdf_path: Path, paper_id: str) -> list[tuple[bytes, st
 
 
 async def _extract_figures(pdf_path: Path, paper_id: str) -> list[str]:
-    """Extract figures and save them, returning list of URLs."""
     loop = asyncio.get_running_loop()
     raw_figures = await loop.run_in_executor(None, _extract_figures_sync, pdf_path, paper_id)
 
@@ -218,16 +352,9 @@ async def _extract_figures(pdf_path: Path, paper_id: str) -> list[str]:
     return figure_urls
 
 
-_BROWSER_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/125.0.0.0 Safari/537.36"
-)
-UNPAYWALL_EMAIL = "papertinder@example.com"
-
+# ── Thumbnail via DOI (og:image / Unpaywall) ──────────────────────────
 
 async def fetch_thumbnail(paper_id: str, doi: str | None) -> list[str]:
-    """Fetch a thumbnail for a paper via og:image or Unpaywall open access PDF."""
     if not doi:
         return []
 
@@ -262,7 +389,6 @@ async def _try_og_image(
     client: httpx.AsyncClient, landing_url: str,
     sid: str, paper_id: str,
 ) -> list[str]:
-    """Extract og:image from the DOI landing page."""
     try:
         resp = await client.get(landing_url)
         if resp.status_code != 200:
@@ -313,8 +439,7 @@ async def _try_unpaywall_pdf(
     client: httpx.AsyncClient, doi_bare: str,
     sid: str, paper_id: str,
 ) -> list[str]:
-    """Use Unpaywall to find an open access PDF, then render the first page."""
-    if not HAS_PYMUPDF:
+    if not (_HAS_PDFIUM or _HAS_PYMUPDF):
         return []
     try:
         resp = await client.get(
@@ -352,6 +477,8 @@ async def _try_unpaywall_pdf(
         return []
 
 
+# ── Main Entry Point ──────────────────────────────────────────────────
+
 async def process_pdf(pdf_url: str | None, paper_id: str, doi: str | None = None) -> ProcessedPDF:
     try:
         return await asyncio.wait_for(
@@ -374,7 +501,15 @@ async def _process_pdf_inner(pdf_url: str | None, paper_id: str, doi: str | None
     loop = asyncio.get_running_loop()
 
     md_text = await loop.run_in_executor(None, _extract_markdown, pdf_path)
-    figures = await _extract_figures(pdf_path, paper_id)
+
+    figures: list[str] = []
+    if _HAS_PYMUPDF:
+        figures = await _extract_figures(pdf_path, paper_id)
+
+    if not figures and (_HAS_PDFIUM or _HAS_PYMUPDF):
+        first_page_url = await _render_first_page(pdf_path, paper_id)
+        if first_page_url:
+            figures = [first_page_url]
 
     return ProcessedPDF(
         paper_id=paper_id,
