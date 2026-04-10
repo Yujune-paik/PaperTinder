@@ -75,7 +75,7 @@ export class SummaryPrefetcher {
 
   _processQueue() {
     while (this._active < CONCURRENCY && this._queue.length > 0) {
-      const paper = this._queue.shift();
+      const paper = this._queue.pop();
       this._active++;
       this._fetchSummary(paper).finally(() => {
         this._active--;
@@ -200,7 +200,6 @@ export class SummaryPrefetcher {
     this._chunkTimers.clear();
     this._queue = [];
     this._cache.clear();
-    this._active = 0;
   }
 
   get readyCount() {

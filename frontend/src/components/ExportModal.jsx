@@ -160,6 +160,9 @@ export default function ExportModal({ onClose }) {
       if (selectedService === "scrapbox_push") {
         res = await fetch("/api/export/scrapbox/push", { method: "POST" });
       }
+      if (!res || !res.ok) {
+        throw new Error(res ? `HTTP ${res.status}` : "Unknown export service");
+      }
       const data = await res.json();
       setResult(data);
       setPhase("result");
