@@ -5,6 +5,7 @@ import MobileSaved from "./components/mobile/MobileSaved";
 import MobileProgress from "./components/mobile/MobileProgress";
 import ExportModal from "./components/ExportModal";
 import StreakBadge from "./components/StreakBadge";
+import { SummaryPrefetcher } from "./summaryPrefetcher";
 import "./mobile.css";
 
 export default function MobileApp() {
@@ -21,6 +22,10 @@ export default function MobileApp() {
   const [searchProgress, setSearchProgress] = useState(null);
   const [showExport, setShowExport] = useState(false);
   const abortRef = useRef(null);
+  const prefetcherRef = useRef(null);
+  if (!prefetcherRef.current) {
+    prefetcherRef.current = new SummaryPrefetcher();
+  }
 
   useEffect(() => {
     const today = new Date().toDateString();
@@ -61,6 +66,7 @@ export default function MobileApp() {
     setSearchState({ venues, year });
     setShowCompletion(false);
     setPapers([]);
+    prefetcherRef.current.reset();
     setSearchProgress({ currentVenue: null, venueIndex: 0, venueTotal: venues.length, totalFound: 0, venueDone: {} });
     setActiveTab("swipe");
 
@@ -109,6 +115,7 @@ export default function MobileApp() {
               const newPapers = (event.papers || []).filter((p) => !allSeen.has(p.paper_id));
               if (newPapers.length > 0) {
                 setPapers((prev) => [...prev, ...newPapers]);
+                newPapers.forEach((p) => prefetcherRef.current.enqueue(p));
               }
               setSearchProgress((prev) => ({
                 ...prev,
@@ -308,6 +315,7 @@ export default function MobileApp() {
             searchProgress={searchProgress}
             showCompletion={showCompletion}
             completionStats={completionStats}
+            prefetcher={prefetcherRef.current}
             onSwipe={handleSwipe}
             onQueueEmpty={handleQueueEmpty}
             onDismissCompletion={() => setShowCompletion(false)}

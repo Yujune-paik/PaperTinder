@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import MobilePaperCard from "./MobilePaperCard";
 import CompletionScreen from "../CompletionScreen";
 
-const PREFETCH_WINDOW = 5;
+const VISIBLE_WINDOW = 4;
 
 export default function MobileSwipe({
   papers,
@@ -12,6 +12,7 @@ export default function MobileSwipe({
   searchProgress,
   showCompletion,
   completionStats,
+  prefetcher,
   onSwipe,
   onQueueEmpty,
   onDismissCompletion,
@@ -20,6 +21,7 @@ export default function MobileSwipe({
   const [currentIndex, setCurrentIndex] = useState(papers.length - 1);
   const [swipeDirection, setSwipeDirection] = useState(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [prefetchReady, setPrefetchReady] = useState(0);
   const currentIndexRef = useRef(currentIndex);
   const cardRefs = useRef([]);
 
@@ -60,8 +62,16 @@ export default function MobileSwipe({
     [swipe]
   );
 
+  useEffect(() => {
+    if (!loading || !prefetcher) return;
+    const timer = setInterval(() => {
+      setPrefetchReady(prefetcher.readyCount);
+    }, 500);
+    return () => clearInterval(timer);
+  }, [loading, prefetcher]);
+
   const visibleCards = useMemo(() => {
-    const start = Math.max(0, currentIndex - (PREFETCH_WINDOW - 1));
+    const start = Math.max(0, currentIndex - (VISIBLE_WINDOW - 1));
     const end = currentIndex + 1;
     return papers.slice(start, end).map((p, i) => ({
       paper: p,
@@ -118,6 +128,15 @@ export default function MobileSwipe({
           <span className="m-loading-count-num">{papers.length}</span>
           <span className="m-loading-count-text">件の論文を準備中...</span>
         </motion.div>
+        {prefetchReady > 0 && (
+          <motion.div
+            className="m-loading-prefetch"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            &#9889; {prefetchReady}件の要約が完了
+          </motion.div>
+        )}
         {searchProgress?.currentVenue && (
           <div className="m-loading-venue">
             <span className="m-pulse-dot" />
@@ -192,7 +211,7 @@ export default function MobileSwipe({
                 <MobilePaperCard
                   paper={paper}
                   isTop={offset === 0}
-                  shouldPreload={true}
+                  prefetcher={prefetcher}
                   onDetailOpen={() => setDetailOpen(true)}
                   onDetailClose={() => setDetailOpen(false)}
                   onSwipeRequest={handleSwipeRequest}

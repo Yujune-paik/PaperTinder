@@ -290,5 +290,60 @@ def load_all_summaries(paper_ids: list[str]) -> dict[str, dict]:
     return {pid: cache[pid] for pid in paper_ids if pid in cache}
 
 
+FIGURES_CACHE_PATH = DATA_DIR / "figures_cache.json"
+TMP_FIGURES_CACHE = TMP_DATA_DIR / "figures_cache.json"
+
+
+def save_figure_urls(paper_id: str, urls: list[str]):
+    """Persist figure URLs for a paper so they can be included in exports."""
+    if not urls:
+        return
+    if _has_redis:
+        _get_redis().set(
+            f"figures:{paper_id.replace('/', '_')}",
+            json.dumps(urls, ensure_ascii=False),
+        )
+        return
+    path = TMP_FIGURES_CACHE if _is_vercel else FIGURES_CACHE_PATH
+    cache = _read_json_file(path, {})
+    cache[paper_id] = urls
+    try:
+        _write_json_file(path, cache)
+    except Exception:
+        logger.warning("Failed to save figures cache")
+
+
+def load_figure_urls(paper_id: str) -> list[str]:
+    """Load figure URLs for a paper."""
+    if _has_redis:
+        data = _get_redis().get(f"figures:{paper_id.replace('/', '_')}")
+        if data is None:
+            return []
+        if isinstance(data, str):
+            return json.loads(data)
+        return data
+    path = TMP_FIGURES_CACHE if _is_vercel else FIGURES_CACHE_PATH
+    cache = _read_json_file(path, {})
+    return cache.get(paper_id, [])
+
+
+def load_all_figure_urls(paper_ids: list[str]) -> dict[str, list[str]]:
+    """Load figure URLs for multiple papers."""
+    if _has_redis:
+        redis = _get_redis()
+        result = {}
+        for pid in paper_ids:
+            data = redis.get(f"figures:{pid.replace('/', '_')}")
+            if data is not None:
+                if isinstance(data, str):
+                    result[pid] = json.loads(data)
+                else:
+                    result[pid] = data
+        return result
+    path = TMP_FIGURES_CACHE if _is_vercel else FIGURES_CACHE_PATH
+    cache = _read_json_file(path, {})
+    return {pid: cache[pid] for pid in paper_ids if pid in cache}
+
+
 def is_vercel() -> bool:
     return _is_vercel

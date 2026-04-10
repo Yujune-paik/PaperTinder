@@ -46,96 +46,41 @@ const DIR_LOCK_PX = 10;
 const SWIPE_PX = 70;
 
 export default function MobilePaperCard({
-  paper, isTop, shouldPreload,
+  paper, isTop, prefetcher,
   onDetailOpen, onDetailClose, onSwipeRequest,
 }) {
   const [summary, setSummary] = useState(null);
   const [streamText, setStreamText] = useState("");
   const [figures, setFigures] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [streamError, setStreamError] = useState(false);
-  const [retryCount, setRetryCount] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [swipeHint, setSwipeHint] = useState(null);
 
   const backRef = useRef(null);
   const frontRef = useRef(null);
 
-  /* ── data loading (prefetch via shouldPreload) ── */
+  /* ── Subscribe to centralized prefetcher ── */
   useEffect(() => {
-    if (!shouldPreload) return;
-    if (summary) return;
+    if (!prefetcher) return;
 
-    setLoading(true);
-    setStreamError(false);
-    setStreamText("");
-
-    const handleSSEStream = (reader) => {
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let fullText = "";
-      let gotContent = false;
-
-      const pump = () => {
-        reader.read().then(({ done, value }) => {
-          if (done) {
-            setLoading(false);
-            if (!gotContent) setStreamError(true);
-            return;
-          }
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (data.type === "figures") {
-                setFigures(data.urls || []);
-              } else if (data.type === "chunk") {
-                fullText += data.text;
-                gotContent = true;
-                setStreamText(fullText);
-              } else if (data.type === "summary") {
-                setSummary(data.data);
-                gotContent = true;
-                setLoading(false);
-              } else if (data.type === "done") {
-                setLoading(false);
-              } else if (data.type === "error") {
-                setLoading(false);
-                setStreamError(true);
-              }
-            } catch { /* ignore */ }
-          }
-          pump();
-        }).catch(() => {
-          setLoading(false);
-          if (!gotContent) setStreamError(true);
-        });
-      };
-      pump();
+    const cb = (entry) => {
+      if (entry.summary) setSummary(entry.summary);
+      if (entry.streamText) setStreamText(entry.streamText);
+      if (entry.figures?.length > 0) setFigures(entry.figures);
+      setLoading(entry.loading);
+      if (entry.error) {
+        setStreamError(true);
+        setLoading(false);
+      }
     };
 
-    const startStream = async () => {
-      try {
-        const esRes = await fetch(`/api/stream/${encodeURIComponent(paper.paper_id)}`);
-        if (esRes.ok) { handleSSEStream(esRes.body.getReader()); return; }
-      } catch { /* fall through */ }
-      try {
-        const res = await fetch("/api/stream-inline", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(paper),
-        });
-        if (res.ok) { handleSSEStream(res.body.getReader()); return; }
-      } catch { /* ignore */ }
-      setLoading(false);
-      setStreamError(true);
-    };
-    startStream();
-    return () => {};
-  }, [shouldPreload, paper.paper_id, retryCount]);
+    const initial = prefetcher.subscribe(paper.paper_id, cb);
+    if (initial) cb(initial);
+    prefetcher.enqueue(paper);
+
+    return () => prefetcher.unsubscribe(paper.paper_id, cb);
+  }, [paper.paper_id, prefetcher]);
 
   /* ── computed ── */
   const liveSummary = useMemo(() => {
@@ -326,8 +271,10 @@ export default function MobilePaperCard({
                 onClick={(e) => {
                   e.stopPropagation();
                   setSummary(null);
+                  setStreamText("");
                   setStreamError(false);
-                  setRetryCount((c) => c + 1);
+                  setLoading(true);
+                  prefetcher?.retry(paper);
                 }}
               >
                 再試行

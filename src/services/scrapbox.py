@@ -57,6 +57,7 @@ def build_daily_page(
     date_str: str,
     papers: list[dict],
     summaries: dict[str, dict],
+    figures: dict[str, list[str]] | None = None,
 ) -> dict:
     """Build a single Scrapbox page for the day's reading session.
 
@@ -64,10 +65,12 @@ def build_daily_page(
         date_str: Date string like "2024-01-15"
         papers: List of dicts with keys from PaperMeta + ReadingListItem
         summaries: {paper_id: {section_key: text}}
+        figures: {paper_id: [url, ...]} – optional figure URLs
 
     Returns:
         Scrapbox page dict with "title" and "lines".
     """
+    figures = figures or {}
     venues = list({p.get("venue") or "Unknown" for p in papers})
     venue_tags = " ".join(f"[{v}]" for v in sorted(venues))
 
@@ -102,6 +105,11 @@ def build_daily_page(
             lines.append(f" 会議: {venue} {year}")
         if url:
             lines.append(f" リンク: [{url}]")
+
+        fig_urls = figures.get(pid, [])
+        for fig_url in fig_urls[:2]:
+            if fig_url.startswith("http"):
+                lines.append(f" [{fig_url}]")
         lines.append("")
 
         summary = summaries.get(pid, {})

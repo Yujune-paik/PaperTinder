@@ -113,6 +113,9 @@ def _summary_event_stream(meta: PaperMeta):
             cached = storage.load_summary(meta.paper_id)
             if cached and any(v for v in cached.values()):
                 logger.info(f"[stream] Cache hit: {meta.paper_id}")
+                cached_figs = storage.load_figure_urls(meta.paper_id)
+                if cached_figs:
+                    yield f"data: {json.dumps({'type': 'figures', 'urls': cached_figs})}\n\n"
                 yield f"data: {json.dumps({'type': 'summary', 'data': cached})}\n\n"
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
                 return
@@ -142,6 +145,7 @@ def _summary_event_stream(meta: PaperMeta):
                     figure_urls = []
 
             if figure_urls:
+                storage.save_figure_urls(meta.paper_id, figure_urls)
                 yield f"data: {json.dumps({'type': 'figures', 'urls': figure_urls})}\n\n"
 
             logger.info(f"[stream] Starting OpenAI summary for {meta.paper_id}")
@@ -311,8 +315,8 @@ async def mark_saved(venue: str, year: int, body: dict):
 # Export helpers
 # ---------------------------------------------------------------------------
 
-def _collect_export_data() -> tuple[str, list[dict], dict[str, dict]]:
-    """Gather papers + summaries for export, returning (date_str, papers, summaries)."""
+def _collect_export_data() -> tuple[str, list[dict], dict[str, dict], dict[str, list[str]]]:
+    """Gather papers + summaries + figures for export."""
     items = _load_reading_list()
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -338,7 +342,8 @@ def _collect_export_data() -> tuple[str, list[dict], dict[str, dict]]:
         papers.append(paper_dict)
 
     summaries_map = storage.load_all_summaries(paper_ids)
-    return date_str, papers, summaries_map
+    figures_map = storage.load_all_figure_urls(paper_ids)
+    return date_str, papers, summaries_map, figures_map
 
 
 # ---------------------------------------------------------------------------
@@ -366,8 +371,8 @@ async def export_scrapbox():
     if not items:
         return {"text": "保存した論文がありません。", "pages": []}
 
-    date_str, papers, summaries_map = _collect_export_data()
-    page = scrapbox_exporter.build_daily_page(date_str, papers, summaries_map)
+    date_str, papers, summaries_map, figures_map = _collect_export_data()
+    page = scrapbox_exporter.build_daily_page(date_str, papers, summaries_map, figures_map)
 
     text = "\n".join(page["lines"])
     return {"text": text, "pages": [page]}
@@ -384,8 +389,8 @@ async def push_scrapbox():
         return {"status": "error", "message": "Scrapbox未設定: SCRAPBOX_SID と SCRAPBOX_PROJECT を設定してください。"}
 
     try:
-        date_str, papers, summaries_map = _collect_export_data()
-        page = scrapbox_exporter.build_daily_page(date_str, papers, summaries_map)
+        date_str, papers, summaries_map, figures_map = _collect_export_data()
+        page = scrapbox_exporter.build_daily_page(date_str, papers, summaries_map, figures_map)
         result = await scrapbox_exporter.push_to_scrapbox([page])
         return result
     except Exception as e:
@@ -404,7 +409,7 @@ async def export_notebooklm_doc():
     if not items:
         return {"text": "保存した論文がありません。", "title": ""}
 
-    date_str, papers, summaries_map = _collect_export_data()
+    date_str, papers, summaries_map, _figures_map = _collect_export_data()
     title = f"論文セッション {date_str}"
     text = notebooklm_service.build_session_document(date_str, papers, summaries_map)
     return {"text": text, "title": title}
