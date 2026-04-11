@@ -79,49 +79,84 @@ export default function ExportModal({ onClose, initialService }) {
     setLoading(true);
     try {
       const res = await fetch("/api/export/notebooklm-doc");
+      if (!res.ok) {
+        throw new Error(`サーバーエラー (HTTP ${res.status})`);
+      }
       const data = await res.json();
-      setExportText(data.text || "");
-      setExportTitle(data.title || "論文セッション");
+      const text = data.text || "";
+      const title = data.title || "論文セッション";
+      setExportText(text);
+      setExportTitle(title);
+
+      // On mobile, try to open share sheet immediately
+      if (canNativeShare && text) {
+        try {
+          await triggerNativeShare(title, text);
+          setResult({ status: "ok", message: "共有シートから送信しました。" });
+          setPhase("result");
+          return;
+        } catch (e) {
+          // If user cancelled or share failed, fall through to preview
+          if (e.name !== "AbortError") {
+            console.warn("Auto share failed, showing preview:", e);
+          }
+        }
+      }
       setPhase("notebooklm_preview");
-    } catch {
-      setExportText("ドキュメント生成に失敗しました。");
+    } catch (e) {
+      setExportText(`ドキュメント生成に失敗しました: ${e.message}`);
       setPhase("notebooklm_preview");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleRetryShare = async () => {
-    if (!canNativeShare) return;
-    const title = exportTitle || "論文セッション";
-    const file = new File(
-      [exportText],
-      `${title}.md`,
-      { type: "text/markdown" }
-    );
+  const triggerNativeShare = async (title, text) => {
+    // Use text/plain for maximum iOS Safari compatibility
+    // (text/markdown is not supported by many share targets)
+    const safeFilename = `paper-session-${new Date().toISOString().slice(0, 10)}.md`;
+    const file = new File([text], safeFilename, { type: "text/plain" });
+
     const canShareFile =
       typeof navigator.canShare === "function" &&
       navigator.canShare({ files: [file] });
+
+    if (canShareFile) {
+      await navigator.share({ title, files: [file] });
+    } else {
+      // Fallback: share as text (may hit size limits on some platforms)
+      await navigator.share({ title, text });
+    }
+  };
+
+  const handleRetryShare = async () => {
+    if (!canNativeShare) return;
+    const title = exportTitle || "論文セッション";
     try {
-      if (canShareFile) {
-        await navigator.share({ title, files: [file] });
-      } else {
-        await navigator.share({ title, text: exportText });
-      }
+      await triggerNativeShare(title, exportText);
       setResult({ status: "ok", message: "共有シートから送信しました。" });
       setPhase("result");
-    } catch {
-      /* user cancelled */
+    } catch (e) {
+      if (e.name === "AbortError") {
+        // user cancelled — do nothing
+        return;
+      }
+      console.error("Share failed:", e);
+      setResult({
+        status: "error",
+        message: `共有に失敗しました: ${e.message}`,
+      });
+      setPhase("result");
     }
   };
 
   const handleDownload = () => {
-    const title = exportTitle || "論文セッション";
-    const blob = new Blob([exportText], { type: "text/markdown" });
+    const safeFilename = `paper-session-${new Date().toISOString().slice(0, 10)}.md`;
+    const blob = new Blob([exportText], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${title}.md`;
+    a.download = safeFilename;
     a.click();
     URL.revokeObjectURL(url);
   };
