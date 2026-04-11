@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import yaml
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File as FastAPIFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -411,6 +411,162 @@ async def export_notebooklm_doc():
     title = f"論文セッション {date_str}"
     text = notebooklm_service.build_session_document(date_str, papers, summaries_map)
     return {"text": text, "title": title}
+
+
+# ---------------------------------------------------------------------------
+# Admin: pre-build cards
+# ---------------------------------------------------------------------------
+
+@app.post("/api/admin/prebuild")
+async def admin_prebuild(req: SearchRequest):
+    """Search papers then pre-generate summaries + figures for every card.
+
+    Streams SSE progress so the admin page can show a live dashboard.
+    """
+    async def event_stream():
+        # Phase 1: search papers
+        yield f"data: {json.dumps({'type': 'phase', 'phase': 'search'}, ensure_ascii=False)}\n\n"
+
+        all_papers: list[PaperMeta] = []
+        async for event in semantic_scholar.stream_search_venues(
+            venues=req.venues, year=req.year,
+            keyword=req.keyword, limit_per_venue=req.limit,
+        ):
+            if event["type"] == "papers":
+                for p_data in event["papers"]:
+                    meta = PaperMeta(**p_data)
+                    _papers_cache[meta.paper_id] = meta
+                    all_papers.append(meta)
+                _save_papers_cache()
+            if event["type"] == "venue_done":
+                yield f"data: {json.dumps({'type': 'venue_done', 'venue': event['venue'], 'count': event.get('venue_count', 0)}, ensure_ascii=False)}\n\n"
+
+        total = len(all_papers)
+        yield f"data: {json.dumps({'type': 'phase', 'phase': 'build', 'total': total}, ensure_ascii=False)}\n\n"
+
+        # Phase 2: process each paper
+        missing_figures: list[dict] = []
+        errors: list[dict] = []
+
+        for idx, meta in enumerate(all_papers):
+            pid = meta.paper_id
+            paper_title = meta.title or "Untitled"
+
+            # skip if both summary and figures are already cached
+            cached_summary = storage.load_summary(pid)
+            cached_figures = storage.load_figure_urls(pid)
+            has_summary = cached_summary and any(v for v in cached_summary.values())
+            has_figures = bool(cached_figures)
+
+            if has_summary and has_figures:
+                yield f"data: {json.dumps({'type': 'progress', 'current': idx + 1, 'total': total, 'paper_id': pid, 'title': paper_title, 'status': 'cached', 'has_summary': True, 'has_figures': True, 'figures_count': len(cached_figures)}, ensure_ascii=False)}\n\n"
+                continue
+
+            try:
+                doi = meta.doi
+                if not doi and meta.semantic_scholar_url and "doi.org/" in meta.semantic_scholar_url:
+                    doi = meta.semantic_scholar_url
+
+                # Process PDF → figures + text
+                figure_urls: list[str] = cached_figures or []
+                md_text = ""
+                if not has_figures or not has_summary:
+                    processed = await pdf_processor.process_pdf(meta.pdf_url, pid, doi)
+                    md_text = processed.markdown_text
+                    if not has_figures:
+                        figure_urls = processed.figure_paths
+                        if not figure_urls and doi:
+                            try:
+                                figure_urls = await pdf_processor.fetch_thumbnail(pid, doi)
+                            except Exception:
+                                pass
+                        if figure_urls:
+                            storage.save_figure_urls(pid, figure_urls)
+
+                # Generate summary
+                if not has_summary:
+                    if md_text:
+                        full_text = ""
+                        async for chunk in summarizer.stream_quick_summary(meta, md_text):
+                            full_text += chunk
+                        parsed = summarizer.parse_tier1_response(full_text)
+                        storage.save_summary(pid, parsed)
+                        has_summary = True
+                    elif meta.abstract:
+                        full_text = ""
+                        async for chunk in summarizer.stream_quick_summary(meta, meta.abstract):
+                            full_text += chunk
+                        parsed = summarizer.parse_tier1_response(full_text)
+                        storage.save_summary(pid, parsed)
+                        has_summary = True
+
+                has_figures = bool(figure_urls)
+                if not has_figures:
+                    missing_figures.append({"paper_id": pid, "title": paper_title})
+
+                yield f"data: {json.dumps({'type': 'progress', 'current': idx + 1, 'total': total, 'paper_id': pid, 'title': paper_title, 'status': 'built', 'has_summary': has_summary, 'has_figures': has_figures, 'figures_count': len(figure_urls)}, ensure_ascii=False)}\n\n"
+
+            except Exception as e:
+                logger.exception(f"Prebuild failed for {pid}")
+                errors.append({"paper_id": pid, "title": paper_title, "error": str(e)})
+                yield f"data: {json.dumps({'type': 'progress', 'current': idx + 1, 'total': total, 'paper_id': pid, 'title': paper_title, 'status': 'error', 'error': str(e)}, ensure_ascii=False)}\n\n"
+
+        yield f"data: {json.dumps({'type': 'done', 'total': total, 'missing_figures': missing_figures, 'errors': errors}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+@app.get("/api/admin/card-status")
+async def admin_card_status(venues: str = "", year: int = 2024):
+    """Return cache status for all papers matching the given venues/year."""
+    venue_list = [v.strip() for v in venues.split(",") if v.strip()]
+    results = []
+
+    for pid, meta in _papers_cache.items():
+        if venue_list and (meta.venue or "") not in venue_list:
+            continue
+        if meta.year and meta.year != year:
+            continue
+
+        cached_summary = storage.load_summary(pid)
+        cached_figures = storage.load_figure_urls(pid)
+        has_summary = bool(cached_summary and any(v for v in cached_summary.values()))
+        has_figures = bool(cached_figures)
+
+        results.append({
+            "paper_id": pid,
+            "title": meta.title,
+            "venue": meta.venue,
+            "year": meta.year,
+            "has_summary": has_summary,
+            "has_figures": has_figures,
+            "figures_count": len(cached_figures) if cached_figures else 0,
+            "figure_urls": cached_figures or [],
+        })
+
+    return {"papers": results, "total": len(results)}
+
+
+@app.post("/api/admin/figures/{paper_id:path}")
+async def admin_upload_figure(paper_id: str, file: UploadFile = FastAPIFile(...)):
+    """Manually upload a figure for a paper that is missing one."""
+    if paper_id not in _papers_cache:
+        raise HTTPException(404, "Paper not in cache")
+
+    content_type = file.content_type or ""
+    if not content_type.startswith("image/"):
+        raise HTTPException(400, "File must be an image")
+
+    img_bytes = await file.read()
+    ext = content_type.split("/")[-1].replace("jpeg", "jpg")
+    filename = f"manual_0.{ext}"
+    url = await pdf_processor._save_figure_bytes(img_bytes, paper_id, filename)
+
+    existing = storage.load_figure_urls(paper_id) or []
+    existing.append(url)
+    storage.save_figure_urls(paper_id, existing)
+
+    return {"status": "ok", "url": url, "figures_count": len(existing)}
 
 
 # ---------------------------------------------------------------------------
