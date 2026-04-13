@@ -31,7 +31,7 @@ const THIS_YEAR = new Date().getFullYear();
 
 export default function SearchBar({ onSearch, loading, searchProgress }) {
   const [selectedVenues, setSelectedVenues] = useState([]);
-  const [selectedYear, setSelectedYear] = useState(2024);
+  const [selectedYear, setSelectedYear] = useState(null);
   const [keyword, setKeyword] = useState("");
 
   const yearRange = useMemo(() => {
@@ -92,9 +92,10 @@ export default function SearchBar({ onSearch, loading, searchProgress }) {
         <div className="venue-group-label">年度</div>
         <select
           className="year-dropdown"
-          value={selectedYear}
+          value={selectedYear ?? ""}
           onChange={(e) => setSelectedYear(Number(e.target.value))}
         >
+          <option value="" disabled>選択してください</option>
           {yearRange.map((y) => (
             <option key={y} value={y}>{y}</option>
           ))}
@@ -114,13 +115,14 @@ export default function SearchBar({ onSearch, loading, searchProgress }) {
       <button
         className="btn btn-primary btn-search"
         onClick={handleSearch}
-        disabled={loading || selectedVenues.length === 0}
+        disabled={loading || selectedVenues.length === 0 || !selectedYear}
       >
         {loading ? (
           <span className="spinner" />
         ) : (
-          <>{selectedVenues.length > 0 ? `${selectedVenues[0]} を検索` : "検索"}</>
-
+          <>{selectedVenues.length > 0 && selectedYear
+            ? `${selectedVenues[0]}'${String(selectedYear).slice(-2)} を検索`
+            : "会議と年度を選択"}</>
         )}
       </button>
 
