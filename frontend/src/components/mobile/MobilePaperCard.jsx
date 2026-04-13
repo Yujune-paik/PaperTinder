@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 
 const SECTION_LABELS = {
-  claim: "Claim（暦本）",
+  claim: "Claim",
   one_line: "1行まとめ",
   what: "どんなもの？",
   novel: "先行研究と比べてどこがすごい？",
@@ -49,10 +49,10 @@ export default function MobilePaperCard({
   paper, isTop, prefetcher,
   onDetailOpen, onDetailClose, onSwipeRequest,
 }) {
-  const [summary, setSummary] = useState(null);
+  const [summary, setSummary] = useState(paper._preloaded_summary || null);
   const [streamText, setStreamText] = useState("");
-  const [figures, setFigures] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [figures, setFigures] = useState(paper._preloaded_figures || []);
+  const [loading, setLoading] = useState(!paper._preloaded_summary);
   const [streamError, setStreamError] = useState(false);
   const [flipped, setFlipped] = useState(false);
   const [swipeHint, setSwipeHint] = useState(null);

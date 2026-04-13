@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const SECTION_LABELS = {
-  claim: "Claim（暦本）",
+  claim: "Claim",
   one_line: "1行まとめ",
   what: "どんなもの？",
   novel: "先行研究と比べてどこがすごい？",
@@ -43,9 +43,9 @@ function parseLiveStream(text) {
 }
 
 export default function PaperCard({ paper, isTop }) {
-  const [summary, setSummary] = useState(null);
+  const [summary, setSummary] = useState(paper._preloaded_summary || null);
   const [streamText, setStreamText] = useState("");
-  const [figures, setFigures] = useState([]);
+  const [figures, setFigures] = useState(paper._preloaded_figures || []);
   const [loading, setLoading] = useState(false);
   const [streamError, setStreamError] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
@@ -259,7 +259,7 @@ export default function PaperCard({ paper, isTop }) {
                 transition={{ duration: 15, ease: "linear" }}
               />
             </div>
-            <p className="skeleton-hint">暦本Claim + 落合フォーマットで要約中...</p>
+            <p className="skeleton-hint">要約を生成中...</p>
           </div>
         ) : streamError ? (
           <div className="summary-error-state">
