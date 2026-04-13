@@ -46,9 +46,9 @@ export default function MobileSearch({ onSearch, loading, searchProgress, onGoSa
     return years;
   }, [selectedVenues]);
 
-  const toggleVenue = (venue) => {
+  const selectVenue = (venue) => {
     setSelectedVenues((prev) =>
-      prev.includes(venue) ? prev.filter((v) => v !== venue) : [...prev, venue]
+      prev.includes(venue) ? [] : [venue]
     );
   };
 
@@ -79,7 +79,7 @@ export default function MobileSearch({ onSearch, loading, searchProgress, onGoSa
                 <button
                   key={v}
                   className={`m-chip ${selectedVenues.includes(v) ? "m-chip-active" : ""}`}
-                  onClick={() => toggleVenue(v)}
+                  onClick={() => selectVenue(v)}
                 >
                   {v}
                 </button>
@@ -150,7 +150,8 @@ export default function MobileSearch({ onSearch, loading, searchProgress, onGoSa
           {loading ? (
             <span className="spinner" />
           ) : (
-            <>検索 ({selectedVenues.length}ベニュー)</>
+            <>{selectedVenues.length > 0 ? `${selectedVenues[0]} を検索` : "検索"}</>
+
           )}
         </button>
       </div>

@@ -493,15 +493,8 @@ async def process_pdf(pdf_url: str | None, paper_id: str, doi: str | None = None
         return ProcessedPDF(paper_id=paper_id, markdown_text="", figure_paths=[])
 
 
-async def _process_pdf_inner(pdf_url: str | None, paper_id: str, doi: str | None = None) -> ProcessedPDF:
-    pdf_path = await download_pdf(pdf_url, paper_id, doi)
-    if not pdf_path:
-        return ProcessedPDF(paper_id=paper_id, markdown_text="", figure_paths=[])
-
-    loop = asyncio.get_running_loop()
-
-    md_text = await loop.run_in_executor(None, _extract_markdown, pdf_path)
-
+async def _get_all_figures(pdf_path: Path, paper_id: str) -> list[str]:
+    """Extract figures (PyMuPDF) or render first page as fallback. Runs as independent task."""
     figures: list[str] = []
     if _HAS_PYMUPDF:
         figures = await _extract_figures(pdf_path, paper_id)
@@ -510,6 +503,21 @@ async def _process_pdf_inner(pdf_url: str | None, paper_id: str, doi: str | None
         first_page_url = await _render_first_page(pdf_path, paper_id)
         if first_page_url:
             figures = [first_page_url]
+
+    return figures
+
+
+async def _process_pdf_inner(pdf_url: str | None, paper_id: str, doi: str | None = None) -> ProcessedPDF:
+    pdf_path = await download_pdf(pdf_url, paper_id, doi)
+    if not pdf_path:
+        return ProcessedPDF(paper_id=paper_id, markdown_text="", figure_paths=[])
+
+    loop = asyncio.get_running_loop()
+
+    md_task = loop.run_in_executor(None, _extract_markdown, pdf_path)
+    fig_task = _get_all_figures(pdf_path, paper_id)
+
+    md_text, figures = await asyncio.gather(md_task, fig_task)
 
     return ProcessedPDF(
         paper_id=paper_id,

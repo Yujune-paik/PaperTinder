@@ -47,9 +47,9 @@ export default function SearchBar({ onSearch, loading, searchProgress }) {
     return years;
   }, [selectedVenues]);
 
-  const toggleVenue = (venue) => {
+  const selectVenue = (venue) => {
     setSelectedVenues((prev) =>
-      prev.includes(venue) ? prev.filter((v) => v !== venue) : [...prev, venue]
+      prev.includes(venue) ? [] : [venue]
     );
   };
 
@@ -79,7 +79,7 @@ export default function SearchBar({ onSearch, loading, searchProgress }) {
               <button
                 key={v}
                 className={`chip ${selectedVenues.includes(v) ? "chip-active" : ""}`}
-                onClick={() => toggleVenue(v)}
+                onClick={() => selectVenue(v)}
               >
                 {v}
               </button>
@@ -119,7 +119,8 @@ export default function SearchBar({ onSearch, loading, searchProgress }) {
         {loading ? (
           <span className="spinner" />
         ) : (
-          <>検索 ({selectedVenues.length}ベニュー)</>
+          <>{selectedVenues.length > 0 ? `${selectedVenues[0]} を検索` : "検索"}</>
+
         )}
       </button>
 
