@@ -9,5 +9,8 @@ upstash-redis>=1.0.0
 pdfminer.six>=20231228
 pypdfium2>=4.0.0
 Pillow>=10.0.0
-markitdown[pdf]>=0.1.0
 google-auth>=2.40.0
+
+# NOTE: markitdown[pdf] は optional (magika/onnxruntime を含み 200MB 超)。
+# Vercel Lambda 上限 (245MB) を超えるため本番 requirements からは外し、
+# ローカル開発でのみ requirements-dev.txt 経由で導入する。

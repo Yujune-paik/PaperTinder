@@ -1,0 +1,6 @@
+-r requirements.txt
+
+# ローカル専用の重い依存。Vercel ビルドサイズ超過を避けるため本番 requirements.txt からは外してある。
+markitdown[pdf]>=0.1.0
+pymupdf>=1.24.0
+pymupdf4llm>=0.0.17
