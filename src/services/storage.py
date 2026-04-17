@@ -345,5 +345,160 @@ def load_all_figure_urls(paper_ids: list[str]) -> dict[str, list[str]]:
     return {pid: cache[pid] for pid in paper_ids if pid in cache}
 
 
+# ---------------------------------------------------------------------------
+# Decks (pre-built card sets per venue+year)
+# ---------------------------------------------------------------------------
+
+DECKS_DIR = DATA_DIR / "decks"
+TMP_DECKS_DIR = TMP_DATA_DIR / "decks"
+
+
+def _deck_key(venue: str, year: int) -> str:
+    return f"{venue.lower().replace(' ', '_')}_{year}"
+
+
+def save_deck(venue: str, year: int, paper_ids: list[str]):
+    key = _deck_key(venue, year)
+    payload = {"venue": venue, "year": year, "paper_ids": paper_ids}
+    if _has_redis:
+        _get_redis().set(f"deck:{key}", json.dumps(payload, ensure_ascii=False))
+        return
+    deck_dir = TMP_DECKS_DIR if _is_vercel else DECKS_DIR
+    deck_dir.mkdir(parents=True, exist_ok=True)
+    _write_json_file(deck_dir / f"{key}.json", payload)
+
+
+def load_deck(venue: str, year: int) -> dict | None:
+    key = _deck_key(venue, year)
+    if _has_redis:
+        data = _get_redis().get(f"deck:{key}")
+        if data is None:
+            return None
+        return json.loads(data) if isinstance(data, str) else data
+    deck_dir = TMP_DECKS_DIR if _is_vercel else DECKS_DIR
+    return _read_json_file(deck_dir / f"{key}.json")
+
+
+def load_all_decks() -> list[dict]:
+    if _has_redis:
+        redis = _get_redis()
+        keys = redis.keys("deck:*")
+        results = []
+        for k in keys or []:
+            data = redis.get(k)
+            if data:
+                parsed = json.loads(data) if isinstance(data, str) else data
+                results.append(parsed)
+        return results
+    deck_dir = TMP_DECKS_DIR if _is_vercel else DECKS_DIR
+    results = []
+    if deck_dir.exists():
+        for path in deck_dir.glob("*.json"):
+            d = _read_json_file(path)
+            if d:
+                results.append(d)
+    return results
+
+
+def delete_deck(venue: str, year: int):
+    key = _deck_key(venue, year)
+    if _has_redis:
+        _get_redis().delete(f"deck:{key}")
+        return
+    deck_dir = TMP_DECKS_DIR if _is_vercel else DECKS_DIR
+    path = deck_dir / f"{key}.json"
+    if path.exists():
+        path.unlink()
+
+
 def is_vercel() -> bool:
     return _is_vercel
+
+
+# ---------------------------------------------------------------------------
+# Users (Google OAuth) and per-user preferences
+# ---------------------------------------------------------------------------
+
+USERS_DIR = DATA_DIR / "users"
+TMP_USERS_DIR = TMP_DATA_DIR / "users"
+SESSIONS_DIR = DATA_DIR / "sessions"
+TMP_SESSIONS_DIR = TMP_DATA_DIR / "sessions"
+
+
+def _users_dir() -> Path:
+    d = TMP_USERS_DIR if _is_vercel else USERS_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _sessions_dir() -> Path:
+    d = TMP_SESSIONS_DIR if _is_vercel else SESSIONS_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def save_user(user: dict):
+    """Create or update a user record keyed by google_id."""
+    google_id = user.get("google_id")
+    if not google_id:
+        return
+    if _has_redis:
+        _get_redis().set(f"user:{google_id}", json.dumps(user, ensure_ascii=False))
+        return
+    _write_json_file(_users_dir() / f"{google_id}.json", user)
+
+
+def load_user(google_id: str) -> dict | None:
+    if _has_redis:
+        data = _get_redis().get(f"user:{google_id}")
+        if data is None:
+            return None
+        return json.loads(data) if isinstance(data, str) else data
+    return _read_json_file(_users_dir() / f"{google_id}.json")
+
+
+def save_user_preferences(google_id: str, preferences: dict):
+    if _has_redis:
+        _get_redis().set(
+            f"user_prefs:{google_id}",
+            json.dumps(preferences, ensure_ascii=False),
+        )
+        return
+    _write_json_file(_users_dir() / f"{google_id}_prefs.json", preferences)
+
+
+def load_user_preferences(google_id: str) -> dict | None:
+    if _has_redis:
+        data = _get_redis().get(f"user_prefs:{google_id}")
+        if data is None:
+            return None
+        return json.loads(data) if isinstance(data, str) else data
+    return _read_json_file(_users_dir() / f"{google_id}_prefs.json")
+
+
+def save_session(session_id: str, google_id: str):
+    if _has_redis:
+        _get_redis().set(f"session:{session_id}", google_id)
+        return
+    _write_json_file(_sessions_dir() / f"{session_id}.json", {"google_id": google_id})
+
+
+def load_session(session_id: str) -> str | None:
+    if _has_redis:
+        data = _get_redis().get(f"session:{session_id}")
+        if data is None:
+            return None
+        return data if isinstance(data, str) else data.get("google_id") if isinstance(data, dict) else None
+    record = _read_json_file(_sessions_dir() / f"{session_id}.json")
+    if not record:
+        return None
+    return record.get("google_id")
+
+
+def delete_session(session_id: str):
+    if _has_redis:
+        _get_redis().delete(f"session:{session_id}")
+        return
+    path = _sessions_dir() / f"{session_id}.json"
+    if path.exists():
+        path.unlink()

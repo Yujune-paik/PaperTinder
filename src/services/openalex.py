@@ -43,13 +43,47 @@ _ACM_PROCEEDINGS_DOI: dict[str, dict[int, str]] = {
         2023: "10.1145/3579605",
         2024: "10.1145/3637297",
     },
+    # DIS — ACM Designing Interactive Systems.
+    # DOI prefixes come from https://dl.acm.org/conference/dis/proceedings
+    "DIS": {
+        2020: "10.1145/3357236",
+        2021: "10.1145/3461778",
+        2022: "10.1145/3532106",
+        2023: "10.1145/3563657",
+        2024: "10.1145/3643834",
+    },
+    "TEI": {
+        2020: "10.1145/3374920",
+        2021: "10.1145/3430524",
+        2022: "10.1145/3490149",
+        2023: "10.1145/3569009",
+        2024: "10.1145/3623509",
+    },
+    "MobileHCI": {
+        2020: "10.1145/3379503",
+        2021: "10.1145/3447526",
+        2022: "10.1145/3546155",
+        2023: "10.1145/3565066",
+        2024: "10.1145/3676515",
+    },
 }
 
-# Journal ISSN / OpenAlex source IDs (for journals with stable identifiers)
+# IEEE conferences: DOI prefix is stable across years (10.1109/{conf}).
+_IEEE_DOI_PREFIX: dict[str, str] = {
+    "CVPR": "10.1109/cvpr",
+    "ICCV": "10.1109/iccv",
+}
+
+# OpenAlex source IDs for journals / proceedings with stable identifiers.
 _SOURCE_IDS: dict[str, str] = {
     "Nature": "S137773608",
     "Science": "S3880285",
     "Science Robotics": "S4210204280",
+    "SIGGRAPH": "S185367456",        # ACM Transactions on Graphics
+    "SIGGRAPH Asia": "S185367456",   # same journal
+    "Ubicomp": "S4210219751",        # Proc. ACM IMWUT
+    "IMWUT": "S4210219751",
+    "AAAI": "S4210191458",           # Proc. AAAI Conference on AI
 }
 
 
@@ -164,10 +198,11 @@ async def _fetch_by_doi_prefix(
     keyword: str | None,
     limit: int,
     venue_label: str,
-) -> AsyncGenerator[list[PaperMeta], None]:
-    """Fetch papers by DOI prefix, yielding pages."""
+) -> AsyncGenerator[dict, None]:
+    """Fetch papers by DOI prefix, yielding page dicts with venue_total."""
     cursor = "*"
     fetched = 0
+    first_page = True
     while fetched < limit:
         per_page = min(PAGE_SIZE, limit - fetched)
         params: dict = {
@@ -187,22 +222,30 @@ async def _fetch_by_doi_prefix(
             break
 
         body = resp.json()
+        meta_info = body.get("meta", {})
         results = body.get("results", [])
         if not results:
+            if first_page:
+                yield {"papers": [], "venue_total": meta_info.get("count", 0)}
             break
 
         papers: list[PaperMeta] = []
         for w in results:
             w["_venue_label"] = venue_label
-            meta = _parse_work(w)
-            if meta:
-                papers.append(meta)
+            p = _parse_work(w)
+            if p:
+                papers.append(p)
+
+        result: dict = {"papers": papers}
+        if first_page:
+            result["venue_total"] = meta_info.get("count", 0)
+            first_page = False
 
         if papers:
-            yield papers
+            yield result
         fetched += len(results)
 
-        next_cursor = body.get("meta", {}).get("next_cursor")
+        next_cursor = meta_info.get("next_cursor")
         if not next_cursor:
             break
         cursor = next_cursor
@@ -210,18 +253,21 @@ async def _fetch_by_doi_prefix(
 
 async def _fetch_by_search(
     client: httpx.AsyncClient,
-    venue: str,
+    venue_search_term: str,
     year: int,
     keyword: str | None,
     limit: int,
-) -> AsyncGenerator[list[PaperMeta], None]:
+    venue_label: str | None = None,
+) -> AsyncGenerator[dict, None]:
     """Fallback: search by keyword + venue name + year filter."""
-    search_query = venue
+    search_query = venue_search_term
     if keyword:
-        search_query = f"{keyword} {venue}"
+        search_query = f"{keyword} {venue_search_term}"
+    label = venue_label or venue_search_term
 
     cursor = "*"
     fetched = 0
+    first_page = True
     while fetched < limit:
         per_page = min(PAGE_SIZE, limit - fetched)
         params: dict = {
@@ -239,22 +285,30 @@ async def _fetch_by_search(
             break
 
         body = resp.json()
+        meta_info = body.get("meta", {})
         results = body.get("results", [])
         if not results:
+            if first_page:
+                yield {"papers": [], "venue_total": meta_info.get("count", 0)}
             break
 
         papers: list[PaperMeta] = []
         for w in results:
-            w["_venue_label"] = venue
-            meta = _parse_work(w)
-            if meta:
-                papers.append(meta)
+            w["_venue_label"] = label
+            p = _parse_work(w)
+            if p:
+                papers.append(p)
+
+        result: dict = {"papers": papers}
+        if first_page:
+            result["venue_total"] = meta_info.get("count", 0)
+            first_page = False
 
         if papers:
-            yield papers
+            yield result
         fetched += len(results)
 
-        next_cursor = body.get("meta", {}).get("next_cursor")
+        next_cursor = meta_info.get("next_cursor")
         if not next_cursor:
             break
         cursor = next_cursor
@@ -267,10 +321,11 @@ async def _fetch_by_source(
     keyword: str | None,
     limit: int,
     venue_label: str,
-) -> AsyncGenerator[list[PaperMeta], None]:
+) -> AsyncGenerator[dict, None]:
     """Fetch papers from a known OpenAlex source (journals)."""
     cursor = "*"
     fetched = 0
+    first_page = True
     while fetched < limit:
         per_page = min(PAGE_SIZE, limit - fetched)
         params: dict = {
@@ -290,37 +345,65 @@ async def _fetch_by_source(
             break
 
         body = resp.json()
+        meta_info = body.get("meta", {})
         results = body.get("results", [])
         if not results:
+            if first_page:
+                yield {"papers": [], "venue_total": meta_info.get("count", 0)}
             break
 
         papers: list[PaperMeta] = []
         for w in results:
             w["_venue_label"] = venue_label
-            meta = _parse_work(w)
-            if meta:
-                papers.append(meta)
+            p = _parse_work(w)
+            if p:
+                papers.append(p)
+
+        result: dict = {"papers": papers}
+        if first_page:
+            result["venue_total"] = meta_info.get("count", 0)
+            first_page = False
 
         if papers:
-            yield papers
+            yield result
         fetched += len(results)
 
-        next_cursor = body.get("meta", {}).get("next_cursor")
+        next_cursor = meta_info.get("next_cursor")
         if not next_cursor:
             break
         cursor = next_cursor
 
 
+# Venues where OpenAlex coverage is unreliable: use a hand-tuned search
+# query instead of the raw venue name.
+_SEARCH_QUERY_OVERRIDES: dict[str, str] = {
+    "ISEA": "International Symposium on Electronic Art",
+    "NIME": "New Interfaces for Musical Expression",
+    "IPSJ": "Information Processing Society of Japan",
+    "WISS": "Workshop on Interactive Systems and Software",
+    "Interaction": "情報処理学会 インタラクション",
+}
+
+
 def _get_venue_strategy(venue: str, year: int):
     """Determine the best search strategy for a venue+year combination."""
     upper = venue.upper()
+
     for conf_name, years in _ACM_PROCEEDINGS_DOI.items():
         if upper == conf_name.upper() and year in years:
             return "doi_prefix", years[year]
 
+    for conf_name, prefix in _IEEE_DOI_PREFIX.items():
+        if upper == conf_name.upper():
+            return "doi_prefix", prefix
+
     for source_name, source_id in _SOURCE_IDS.items():
         if upper == source_name.upper():
             return "source_id", source_id
+
+    for search_name, query in _SEARCH_QUERY_OVERRIDES.items():
+        if upper == search_name.upper():
+            return "search", query
 
     return "search", None
 
@@ -330,8 +413,12 @@ async def stream_search_venue(
     year: int,
     keyword: str | None = None,
     limit: int = 50,
-) -> AsyncGenerator[list[PaperMeta], None]:
-    """Stream papers for a single venue, yielding batches."""
+) -> AsyncGenerator[dict, None]:
+    """Stream papers for a single venue.
+
+    Yields dicts: ``{"papers": list[PaperMeta], "venue_total": int}``
+    (``venue_total`` is present only on the first batch).
+    """
     strategy, param = _get_venue_strategy(venue, year)
     logger.info(f"OpenAlex: venue={venue} year={year} strategy={strategy} param={param}")
 
@@ -343,5 +430,6 @@ async def stream_search_venue(
             async for batch in _fetch_by_source(client, param, year, keyword, limit, venue):
                 yield batch
         else:
-            async for batch in _fetch_by_search(client, venue, year, keyword, limit):
+            search_term = param or venue
+            async for batch in _fetch_by_search(client, search_term, year, keyword, limit, venue):
                 yield batch

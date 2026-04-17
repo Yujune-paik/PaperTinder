@@ -846,11 +846,41 @@
 
 .m-swipe-counter-bar {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 6px;
   flex-shrink: 0;
-  padding: 8px 0 2px;
+  padding: 8px 16px 2px;
+}
+.m-swipe-counter-bar > .m-swipe-counter-text,
+.m-swipe-counter-bar > .m-swipe-hint-text {
+  display: inline;
+}
+.m-venue-progress {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+.m-venue-progress-track {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+.m-venue-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), #10b981);
+  transition: width 0.4s ease;
+}
+.m-venue-progress-label {
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  font-weight: 500;
 }
 
 .m-swipe-counter-text {
@@ -1499,3 +1529,129 @@
   justify-content: center;
   min-height: 44px;
 }
+
+/* ---------- Mobile Auth + Venue Settings ---------- */
+
+.m-search-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.m-venue-settings-open-btn {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 1.05rem;
+}
+.m-search-empty-venues {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 14px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 12px;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  margin-bottom: 12px;
+}
+
+.m-venue-settings-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 2000;
+}
+.m-venue-settings-modal {
+  background: var(--panel, #14141c);
+  width: 100%;
+  max-height: 90vh;
+  border-top-left-radius: 18px;
+  border-top-right-radius: 18px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.m-venue-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.m-venue-settings-header h3 { margin: 0; font-size: 1rem; }
+.m-venue-settings-close {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 1.4rem;
+  cursor: pointer;
+}
+.m-venue-settings-note {
+  padding: 10px 18px;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.m-venue-settings-body {
+  padding: 14px 18px 18px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.m-venue-settings-group-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+.m-venue-settings-items { display: flex; flex-wrap: wrap; gap: 8px; }
+.m-venue-settings-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  font-size: 0.85rem;
+}
+.m-venue-settings-item.active {
+  background: rgba(108,92,231,0.25);
+  border-color: var(--accent, #6c5ce7);
+  color: #fff;
+}
+.m-venue-settings-footer {
+  display: flex;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+.m-venue-settings-cancel, .m-venue-settings-save {
+  flex: 1;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.1);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.m-venue-settings-cancel { background: transparent; color: var(--text-dim); }
+.m-venue-settings-save {
+  background: var(--accent, #6c5ce7);
+  border-color: var(--accent, #6c5ce7);
+  color: #fff;
+  font-weight: 600;
+}
+

@@ -5,7 +5,7 @@ import PaperCard from "./PaperCard";
 
 const PREFETCH_THRESHOLD = 3;
 
-export default function SwipeStack({ papers, onSwipe, onQueueEmpty }) {
+export default function SwipeStack({ papers, onSwipe, onQueueEmpty, venueProgress }) {
   const [currentIndex, setCurrentIndex] = useState(papers.length - 1);
   const [swipeDirection, setSwipeDirection] = useState(null);
   const currentIndexRef = useRef(currentIndex);
@@ -145,6 +145,21 @@ export default function SwipeStack({ papers, onSwipe, onQueueEmpty }) {
           <small>Save</small>
         </button>
       </div>
+
+      {venueProgress && venueProgress.total > 0 && (
+        <div className="venue-progress-bar">
+          <div className="venue-progress-track">
+            <div
+              className="venue-progress-fill"
+              style={{ width: `${Math.min(100, Math.round((venueProgress.seen / venueProgress.total) * 100))}%` }}
+            />
+          </div>
+          <span className="venue-progress-label">
+            {venueProgress.seen} / {venueProgress.total} 件チェック済み
+            ({Math.round((venueProgress.seen / venueProgress.total) * 100)}%)
+          </span>
+        </div>
+      )}
 
       <div className="swipe-hint">
         <kbd>←</kbd> スキップ &nbsp; <kbd>→</kbd> 保存

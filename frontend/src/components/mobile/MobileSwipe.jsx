@@ -13,6 +13,7 @@ export default function MobileSwipe({
   showCompletion,
   completionStats,
   prefetcher,
+  venueProgress,
   onSwipe,
   onQueueEmpty,
   onDismissCompletion,
@@ -224,6 +225,19 @@ export default function MobileSwipe({
 
       {papers.length > 0 && (
         <div className="m-swipe-counter-bar">
+          {venueProgress && venueProgress.total > 0 && (
+            <div className="m-venue-progress">
+              <div className="m-venue-progress-track">
+                <div
+                  className="m-venue-progress-fill"
+                  style={{ width: `${Math.min(100, Math.round((venueProgress.seen / venueProgress.total) * 100))}%` }}
+                />
+              </div>
+              <span className="m-venue-progress-label">
+                {venueProgress.seen} / {venueProgress.total} 件チェック済み ({Math.round((venueProgress.seen / venueProgress.total) * 100)}%)
+              </span>
+            </div>
+          )}
           <span className="m-swipe-counter-text">
             {papers.length - currentIndex - 1} / {papers.length}
           </span>

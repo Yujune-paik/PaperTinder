@@ -399,6 +399,34 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.venue-progress-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
+}
+.venue-progress-track {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+.venue-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--accent), #10b981);
+  transition: width 0.4s ease;
+}
+.venue-progress-label {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
 .swipe-hint {
   font-size: 0.75rem;
   color: var(--text-dim);
@@ -1511,3 +1539,198 @@ body {
     font-size: 0.95rem;
   }
 }
+
+/* -----------------------------------------------------------
+ * Auth + Venue settings (desktop)
+ * ----------------------------------------------------------- */
+
+.auth-user-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 4px 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+.auth-user-btn:hover { background: rgba(255, 255, 255, 0.08); }
+.auth-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.auth-avatar-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.auth-name {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.auth-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  background: var(--panel);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  padding: 12px;
+  min-width: 220px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+  z-index: 1000;
+}
+.auth-menu-name { font-weight: 600; font-size: 0.9rem; }
+.auth-menu-email { color: var(--text-dim); font-size: 0.78rem; margin-bottom: 10px; }
+.auth-menu-item {
+  width: 100%;
+  padding: 8px;
+  border-radius: 8px;
+  border: none;
+  background: rgba(255,255,255,0.05);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.auth-menu-item:hover { background: rgba(255,255,255,0.1); }
+.auth-login-error { color: #f87171; font-size: 0.75rem; margin-top: 4px; }
+
+.search-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.venue-settings-open-btn {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.1);
+  color: var(--text-dim);
+  border-radius: 8px;
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+.venue-settings-open-btn:hover { color: var(--text); border-color: rgba(255,255,255,0.2); }
+.search-empty-venues {
+  background: rgba(255,255,255,0.03);
+  border: 1px dashed rgba(255,255,255,0.1);
+  padding: 12px;
+  border-radius: 10px;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+.link-btn, .m-link-btn {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.82rem;
+  text-decoration: underline;
+}
+
+.venue-settings-backdrop, .m-venue-settings-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 20px;
+}
+.venue-settings-modal {
+  background: var(--panel);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 560px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.venue-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.venue-settings-header h3 { margin: 0; font-size: 1rem; }
+.venue-settings-close {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 1.3rem;
+  cursor: pointer;
+}
+.venue-settings-note {
+  padding: 10px 18px;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.venue-settings-body {
+  padding: 14px 18px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.venue-settings-group-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+.venue-settings-items { display: flex; flex-wrap: wrap; gap: 8px; }
+.venue-settings-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+.venue-settings-item.active {
+  background: rgba(108, 92, 231, 0.2);
+  border-color: var(--accent);
+  color: #fff;
+}
+.venue-settings-item input { accent-color: var(--accent); }
+.venue-settings-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+.venue-settings-cancel, .venue-settings-save {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.1);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.venue-settings-cancel { background: transparent; color: var(--text-dim); }
+.venue-settings-save { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }

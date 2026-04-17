@@ -1,50 +1,48 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useVenueList, useVenuePreferences } from "../../usePreferences";
+import VenueSettings from "../VenueSettings";
 
-const VENUE_META = {
-  CHI:              { group: "HCI",      since: 1982 },
-  UIST:             { group: "HCI",      since: 1988 },
-  CSCW:             { group: "HCI",      since: 1986 },
-  Ubicomp:          { group: "HCI",      since: 2001 },
-  ISWC:             { group: "HCI",      since: 1997 },
-  HRI:              { group: "HCI",      since: 2006 },
-  ISS:              { group: "HCI",      since: 2013 },
-  DIS:              { group: "HCI",      since: 1995 },
-  TEI:              { group: "HCI",      since: 2007 },
-  MobileHCI:        { group: "HCI",      since: 1998 },
-  NeurIPS:          { group: "AI / ML",  since: 1987 },
-  CVPR:             { group: "AI / ML",  since: 1983 },
-  ICCV:             { group: "AI / ML",  since: 1987 },
-  ICML:             { group: "AI / ML",  since: 1984 },
-  ECCV:             { group: "AI / ML",  since: 1990 },
-  AAAI:             { group: "AI / ML",  since: 1980 },
-  SIGGRAPH:         { group: "Graphics", since: 1974 },
-  "SIGGRAPH Asia":  { group: "Graphics", since: 2008 },
-  Nature:           { group: "Journals", since: 1869 },
-  Science:          { group: "Journals", since: 1880 },
-  "Science Robotics": { group: "Journals", since: 2016 },
-};
-
-const GROUPS = ["HCI", "AI / ML", "Graphics", "Journals"];
 const THIS_YEAR = new Date().getFullYear();
 
 export default function MobileSearch({ onSearch, loading, searchProgress, onGoSaved, onGoProgress }) {
+  const { venues, groups } = useVenueList();
+  const { preferences } = useVenuePreferences();
   const [selectedVenues, setSelectedVenues] = useState([]);
   const [selectedYear, setSelectedYear] = useState(null);
   const [keyword, setKeyword] = useState("");
+  const [decks, setDecks] = useState([]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/decks").then((r) => r.json()).then((d) => setDecks(d.decks || [])).catch(() => {});
+  }, []);
+
+  const venueMeta = useMemo(() => {
+    const map = {};
+    for (const v of venues) map[v.name] = v;
+    return map;
+  }, [venues]);
+
+  const preferredSet = useMemo(() => new Set(preferences || []), [preferences]);
+
+  const hasDeck = useMemo(() => {
+    if (selectedVenues.length !== 1 || !selectedYear) return false;
+    return decks.some((d) => d.venue === selectedVenues[0] && d.year === selectedYear);
+  }, [selectedVenues, selectedYear, decks]);
 
   const yearRange = useMemo(() => {
     let earliest = 2000;
     if (selectedVenues.length > 0) {
       earliest = Math.min(
-        ...selectedVenues.map((v) => VENUE_META[v]?.since ?? 2000)
+        ...selectedVenues.map((v) => venueMeta[v]?.since ?? 2000)
       );
     }
     earliest = Math.max(earliest, 2000);
     const years = [];
     for (let y = THIS_YEAR; y >= earliest; y--) years.push(y);
     return years;
-  }, [selectedVenues]);
+  }, [selectedVenues, venueMeta]);
 
   const selectVenue = (venue) => {
     setSelectedVenues((prev) =>
@@ -58,35 +56,57 @@ export default function MobileSearch({ onSearch, loading, searchProgress, onGoSa
   };
 
   const groupedVenues = useMemo(() => {
-    return GROUPS.map((group) => ({
+    return (groups || []).map((group) => ({
       label: group,
-      venues: Object.entries(VENUE_META)
-        .filter(([, meta]) => meta.group === group)
-        .map(([name]) => name),
-    }));
-  }, []);
+      venues: venues.filter((v) => v.group === group && preferredSet.has(v.name)),
+    })).filter((g) => g.venues.length > 0);
+  }, [venues, groups, preferredSet]);
 
   return (
     <div className="m-search">
-      <h2 className="m-search-title">Discover<br /><span style={{ color: 'var(--text-dim)' }}>New Knowledge</span></h2>
+      <div className="m-search-title-row">
+        <h2 className="m-search-title">Discover<br /><span style={{ color: 'var(--text-dim)' }}>New Knowledge</span></h2>
+        <button
+          type="button"
+          className="m-venue-settings-open-btn"
+          onClick={() => setSettingsOpen(true)}
+          aria-label="会議を編集"
+          title="表示する会議を編集"
+        >
+          &#9881;
+        </button>
+      </div>
 
       <div className="m-search-scroll">
-        {groupedVenues.map((group) => (
-          <div key={group.label} className="m-venue-group">
-            <div className="m-venue-group-label">{group.label}</div>
-            <div className="m-venue-chips">
-              {group.venues.map((v) => (
-                <button
-                  key={v}
-                  className={`m-chip ${selectedVenues.includes(v) ? "m-chip-active" : ""}`}
-                  onClick={() => selectVenue(v)}
-                >
-                  {v}
-                </button>
-              ))}
-            </div>
+        {groupedVenues.length === 0 ? (
+          <div className="m-search-empty-venues">
+            表示する会議が設定されていません。
+            <button
+              type="button"
+              className="m-link-btn"
+              onClick={() => setSettingsOpen(true)}
+            >
+              会議を選択
+            </button>
           </div>
-        ))}
+        ) : (
+          groupedVenues.map((group) => (
+            <div key={group.label} className="m-venue-group">
+              <div className="m-venue-group-label">{group.label}</div>
+              <div className="m-venue-chips">
+                {group.venues.map((v) => (
+                  <button
+                    key={v.name}
+                    className={`m-chip ${selectedVenues.includes(v.name) ? "m-chip-active" : ""}`}
+                    onClick={() => selectVenue(v.name)}
+                  >
+                    {v.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))
+        )}
 
         <div className="m-venue-group">
           <div className="m-venue-group-label">年度</div>
@@ -152,11 +172,15 @@ export default function MobileSearch({ onSearch, loading, searchProgress, onGoSa
             <span className="spinner" />
           ) : (
             <>{selectedVenues.length > 0 && selectedYear
-              ? `${selectedVenues[0]}'${String(selectedYear).slice(-2)} を検索`
+              ? hasDeck
+                ? `${selectedVenues[0]}'${String(selectedYear).slice(-2)} を読み込む`
+                : `${selectedVenues[0]}'${String(selectedYear).slice(-2)} を検索`
               : "会議と年度を選択"}</>
           )}
         </button>
       </div>
+
+      <VenueSettings open={settingsOpen} onClose={() => setSettingsOpen(false)} mobile />
     </div>
   );
 }

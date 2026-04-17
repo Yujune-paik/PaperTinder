@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import yaml
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File as FastAPIFile
+from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File as FastAPIFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -19,6 +19,8 @@ from fastapi.staticfiles import StaticFiles
 from src.models import PaperMeta, ProgressData, ReadingListItem, SearchRequest
 from src.services import pdf_processor, semantic_scholar, summarizer
 from src.services import storage
+from src.services import auth as auth_service
+from src.services import venues as venues_service
 from src.services import scrapbox as scrapbox_exporter
 from src.services import notebooklm as notebooklm_service
 
@@ -170,6 +172,11 @@ def _summary_event_stream(meta: PaperMeta):
 
 @app.post("/api/papers/stream")
 async def stream_search_papers(req: SearchRequest):
+    # Papers seen per venue during this search so we can persist a deck
+    # at the end — this way any subsequent user hitting the same venue/year
+    # gets the cached deck without re-calling OpenAlex.
+    venue_papers: dict[str, list[str]] = {}
+
     async def event_stream():
         async for event in semantic_scholar.stream_search_venues(
             venues=req.venues,
@@ -181,13 +188,26 @@ async def stream_search_papers(req: SearchRequest):
                 for p_data in event["papers"]:
                     meta = PaperMeta(**p_data)
                     _papers_cache[meta.paper_id] = meta
+                    v = meta.venue or event.get("venue") or "unknown"
+                    venue_papers.setdefault(v, []).append(meta.paper_id)
                 _save_papers_cache()
 
             if event["type"] == "venue_done":
                 venue = event["venue"]
                 prog = _load_progress(venue, req.year)
-                prog.total = max(prog.total, event["venue_count"])
+                prog.total = max(prog.total, event.get("venue_total", event["venue_count"]))
                 _save_progress(prog)
+
+                # Auto-save deck: only write if the same venue+year is not
+                # already stored, to preserve manually curated decks.
+                pids = venue_papers.get(venue) or venue_papers.get(event["venue"]) or []
+                if pids:
+                    existing = storage.load_deck(venue, req.year)
+                    if not existing:
+                        try:
+                            storage.save_deck(venue, req.year, pids)
+                        except Exception:
+                            logger.warning(f"Failed to auto-save deck {venue} {req.year}")
 
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
@@ -414,6 +434,82 @@ async def export_notebooklm_doc():
 
 
 # ---------------------------------------------------------------------------
+# Decks (pre-built card sets)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/decks")
+async def list_decks():
+    """Return all available pre-built decks with per-deck stats."""
+    decks = storage.load_all_decks()
+    result = []
+    for d in decks:
+        venue = d.get("venue", "")
+        year = d.get("year", 0)
+        paper_ids = d.get("paper_ids", [])
+        missing_fig = 0
+        missing_sum = 0
+        for pid in paper_ids:
+            figs = storage.load_figure_urls(pid)
+            summ = storage.load_summary(pid)
+            if not figs:
+                missing_fig += 1
+            if not summ or not any(v for v in summ.values()):
+                missing_sum += 1
+        result.append({
+            "venue": venue,
+            "year": year,
+            "count": len(paper_ids),
+            "missing_figures": missing_fig,
+            "missing_summary": missing_sum,
+        })
+    return {"decks": result}
+
+
+@app.get("/api/decks/{venue}/{year}")
+async def get_deck(venue: str, year: int, offset: int = 0, limit: int = 0):
+    """Return cards in a pre-built deck with summaries and figure URLs.
+
+    Supports pagination via ``offset`` and ``limit`` query parameters.
+    When ``limit`` is 0 (default), all cards are returned for backward
+    compatibility.
+    """
+    deck = storage.load_deck(venue, year)
+    if not deck:
+        raise HTTPException(404, "Deck not found")
+
+    paper_ids = deck.get("paper_ids", [])
+    deck_total = len(paper_ids)
+
+    if limit > 0:
+        paper_ids = paper_ids[offset : offset + limit]
+
+    cards = []
+    for pid in paper_ids:
+        meta = _papers_cache.get(pid)
+        if not meta:
+            continue
+        summary = storage.load_summary(pid)
+        figures = storage.load_figure_urls(pid)
+        has_summary = bool(summary and any(v for v in summary.values()))
+        cards.append({
+            **meta.model_dump(),
+            "summary": summary,
+            "figure_urls": figures or [],
+            "has_summary": has_summary,
+            "has_figures": bool(figures),
+        })
+
+    return {
+        "venue": venue,
+        "year": year,
+        "cards": cards,
+        "total": deck_total,
+        "offset": offset,
+        "has_more": (offset + len(cards)) < deck_total,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Admin: pre-build cards
 # ---------------------------------------------------------------------------
 
@@ -422,12 +518,13 @@ async def admin_prebuild(req: SearchRequest):
     """Search papers then pre-generate summaries + figures for every card.
 
     Streams SSE progress so the admin page can show a live dashboard.
+    On completion, saves the result as a deck per venue.
     """
     async def event_stream():
-        # Phase 1: search papers
         yield f"data: {json.dumps({'type': 'phase', 'phase': 'search'}, ensure_ascii=False)}\n\n"
 
         all_papers: list[PaperMeta] = []
+        venue_papers: dict[str, list[str]] = {}
         async for event in semantic_scholar.stream_search_venues(
             venues=req.venues, year=req.year,
             keyword=req.keyword, limit_per_venue=req.limit,
@@ -437,14 +534,20 @@ async def admin_prebuild(req: SearchRequest):
                     meta = PaperMeta(**p_data)
                     _papers_cache[meta.paper_id] = meta
                     all_papers.append(meta)
+                    v = meta.venue or "unknown"
+                    venue_papers.setdefault(v, []).append(meta.paper_id)
                 _save_papers_cache()
             if event["type"] == "venue_done":
-                yield f"data: {json.dumps({'type': 'venue_done', 'venue': event['venue'], 'count': event.get('venue_count', 0)}, ensure_ascii=False)}\n\n"
+                v_name = event["venue"]
+                v_total = event.get("venue_total", event.get("venue_count", 0))
+                prog = _load_progress(v_name, req.year)
+                prog.total = max(prog.total, v_total)
+                _save_progress(prog)
+                yield f"data: {json.dumps({'type': 'venue_done', 'venue': v_name, 'count': event.get('venue_count', 0), 'venue_total': v_total}, ensure_ascii=False)}\n\n"
 
         total = len(all_papers)
         yield f"data: {json.dumps({'type': 'phase', 'phase': 'build', 'total': total}, ensure_ascii=False)}\n\n"
 
-        # Phase 2: process each paper
         missing_figures: list[dict] = []
         errors: list[dict] = []
 
@@ -452,7 +555,6 @@ async def admin_prebuild(req: SearchRequest):
             pid = meta.paper_id
             paper_title = meta.title or "Untitled"
 
-            # skip if both summary and figures are already cached
             cached_summary = storage.load_summary(pid)
             cached_figures = storage.load_figure_urls(pid)
             has_summary = cached_summary and any(v for v in cached_summary.values())
@@ -467,7 +569,6 @@ async def admin_prebuild(req: SearchRequest):
                 if not doi and meta.semantic_scholar_url and "doi.org/" in meta.semantic_scholar_url:
                     doi = meta.semantic_scholar_url
 
-                # Process PDF → figures + text
                 figure_urls: list[str] = cached_figures or []
                 md_text = ""
                 if not has_figures or not has_summary:
@@ -483,7 +584,6 @@ async def admin_prebuild(req: SearchRequest):
                         if figure_urls:
                             storage.save_figure_urls(pid, figure_urls)
 
-                # Generate summary
                 if not has_summary:
                     if md_text:
                         full_text = ""
@@ -511,7 +611,10 @@ async def admin_prebuild(req: SearchRequest):
                 errors.append({"paper_id": pid, "title": paper_title, "error": str(e)})
                 yield f"data: {json.dumps({'type': 'progress', 'current': idx + 1, 'total': total, 'paper_id': pid, 'title': paper_title, 'status': 'error', 'error': str(e)}, ensure_ascii=False)}\n\n"
 
-        yield f"data: {json.dumps({'type': 'done', 'total': total, 'missing_figures': missing_figures, 'errors': errors}, ensure_ascii=False)}\n\n"
+        for venue_name, pids in venue_papers.items():
+            storage.save_deck(venue_name, req.year, pids)
+
+        yield f"data: {json.dumps({'type': 'done', 'total': total, 'missing_figures': missing_figures, 'errors': errors, 'decks_saved': list(venue_papers.keys())}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream", headers=SSE_HEADERS)
 
@@ -567,6 +670,101 @@ async def admin_upload_figure(paper_id: str, file: UploadFile = FastAPIFile(...)
     storage.save_figure_urls(paper_id, existing)
 
     return {"status": "ok", "url": url, "figures_count": len(existing)}
+
+
+# ---------------------------------------------------------------------------
+# Auth (Google Sign-In)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/auth/config")
+async def auth_config():
+    """Tell the frontend whether Google login is available and with which client id."""
+    return {
+        "enabled": auth_service.is_configured(),
+        "client_id": os.environ.get("GOOGLE_CLIENT_ID", "") if auth_service.is_configured() else "",
+    }
+
+
+@app.post("/api/auth/google")
+async def auth_google(body: dict, response: Response):
+    credential = body.get("credential") or body.get("id_token")
+    if not credential:
+        raise HTTPException(400, "credential required")
+
+    result = auth_service.login_with_google(credential)
+    if not result:
+        raise HTTPException(401, "Google authentication failed")
+
+    user, session_id = result
+    response.set_cookie(
+        key=auth_service.SESSION_COOKIE,
+        value=session_id,
+        max_age=auth_service.SESSION_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=storage.is_vercel(),
+    )
+    return {"status": "ok", "user": user}
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    user = auth_service.get_current_user(request)
+    if not user:
+        return {"user": None}
+    return {"user": user}
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request, response: Response):
+    auth_service.logout(request)
+    response.delete_cookie(auth_service.SESSION_COOKIE)
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Venues + user preferences
+# ---------------------------------------------------------------------------
+
+@app.get("/api/venues")
+async def list_available_venues():
+    """Return all venues the backend can search, with grouping info."""
+    return {
+        "venues": venues_service.list_venues(),
+        "groups": venues_service.GROUP_ORDER,
+        "defaults": venues_service.default_preferences(),
+    }
+
+
+@app.get("/api/user/preferences")
+async def get_user_preferences(request: Request):
+    user = auth_service.get_current_user(request)
+    if not user:
+        return {
+            "authenticated": False,
+            "venue_preferences": venues_service.default_preferences(),
+        }
+    prefs = storage.load_user_preferences(user["google_id"]) or {}
+    return {
+        "authenticated": True,
+        "venue_preferences": prefs.get("venue_preferences", venues_service.default_preferences()),
+    }
+
+
+@app.put("/api/user/preferences")
+async def update_user_preferences(request: Request, body: dict):
+    user = auth_service.get_current_user(request)
+    if not user:
+        raise HTTPException(401, "Login required")
+    prefs_in = body.get("venue_preferences")
+    if not isinstance(prefs_in, list):
+        raise HTTPException(400, "venue_preferences must be a list")
+
+    valid = set(venues_service.all_venue_names())
+    cleaned = [v for v in prefs_in if isinstance(v, str) and v in valid]
+
+    storage.save_user_preferences(user["google_id"], {"venue_preferences": cleaned})
+    return {"status": "ok", "venue_preferences": cleaned}
 
 
 # ---------------------------------------------------------------------------

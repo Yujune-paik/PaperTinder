@@ -125,6 +125,10 @@ async def stream_search_venues(
 
     Tries OpenAlex first; falls back to Semantic Scholar if OpenAlex
     returns zero results for a venue.
+
+    The ``venue_done`` event now includes ``venue_total`` — the true number
+    of papers available in the venue (from OpenAlex ``meta.count``), which
+    may be larger than the number actually fetched.
     """
     seen_ids: set[str] = set()
     total_found = 0
@@ -138,9 +142,14 @@ async def stream_search_venues(
         }
 
         venue_papers: list[PaperMeta] = []
+        venue_total_from_api: int | None = None
         source_used = "openalex"
 
-        async for batch in openalex.stream_search_venue(venue, year, keyword, limit_per_venue):
+        async for batch_dict in openalex.stream_search_venue(venue, year, keyword, limit_per_venue):
+            batch = batch_dict.get("papers", [])
+            if "venue_total" in batch_dict:
+                venue_total_from_api = batch_dict["venue_total"]
+
             new_papers = [p for p in batch if p.paper_id not in seen_ids]
             for p in new_papers:
                 seen_ids.add(p.paper_id)
@@ -173,12 +182,17 @@ async def stream_search_venues(
                         "total_found": total_found,
                     }
 
-        logger.info(f"{venue} {year}: {len(venue_papers)} papers via {source_used}")
+        venue_count = len(venue_papers)
+        logger.info(
+            f"{venue} {year}: {venue_count} papers via {source_used}"
+            f" (API total: {venue_total_from_api})"
+        )
 
         yield {
             "type": "venue_done",
             "venue": venue,
-            "venue_count": len(venue_papers),
+            "venue_count": venue_count,
+            "venue_total": venue_total_from_api or venue_count,
             "total_found": total_found,
         }
 

@@ -43,4 +43,16 @@ class SearchRequest(BaseModel):
     venues: list[str]
     year: int = 2024
     keyword: str | None = None
-    limit: int = 50
+    limit: int = 9999
+
+
+class User(BaseModel):
+    google_id: str
+    email: str
+    name: str | None = None
+    picture: str | None = None
+    created_at: str | None = None
+
+
+class UserPreferences(BaseModel):
+    venue_preferences: list[str] = Field(default_factory=list)

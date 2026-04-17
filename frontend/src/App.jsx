@@ -7,6 +7,9 @@ import ExportModal from "./components/ExportModal";
 import StreakBadge from "./components/StreakBadge";
 import ProgressBar from "./components/ProgressBar";
 import CompletionScreen from "./components/CompletionScreen";
+import LoginButton from "./components/LoginButton";
+
+const DECK_PAGE_SIZE = 50;
 
 export default function App() {
   const [papers, setPapers] = useState([]);
@@ -21,7 +24,9 @@ export default function App() {
   const [completionStats, setCompletionStats] = useState(null);
   const [seenIds, setSeenIds] = useState(new Set());
   const [searchProgress, setSearchProgress] = useState(null);
+  const [venueProgress, setVenueProgress] = useState(null);
   const abortRef = useRef(null);
+  const deckRef = useRef({ venue: null, year: null, offset: 0, total: 0, hasMore: false, loading: false, seenSet: new Set() });
 
   useEffect(() => {
     const today = new Date().toDateString();
@@ -57,6 +62,31 @@ export default function App() {
     }
   };
 
+  const loadDeckPage = useCallback(async (venue, year, offset, seenSet) => {
+    try {
+      const res = await fetch(
+        `/api/decks/${encodeURIComponent(venue)}/${year}?offset=${offset}&limit=${DECK_PAGE_SIZE}`
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      const cards = (data.cards || [])
+        .filter((c) => !seenSet.has(c.paper_id))
+        .map((c) => ({
+          ...c,
+          _preloaded_summary: c.summary || null,
+          _preloaded_figures: c.figure_urls || [],
+        }));
+      return {
+        cards,
+        total: data.total || 0,
+        hasMore: data.has_more || false,
+        nextOffset: offset + DECK_PAGE_SIZE,
+      };
+    } catch {
+      return null;
+    }
+  }, []);
+
   const handleSearch = async (venues, year, keyword) => {
     if (abortRef.current) abortRef.current.abort();
     const controller = new AbortController();
@@ -66,6 +96,8 @@ export default function App() {
     setSearchState({ venues, year });
     setShowCompletion(false);
     setPapers([]);
+    setVenueProgress(null);
+    deckRef.current = { venue: null, year: null, offset: 0, total: 0, hasMore: false, loading: false, seenSet: new Set() };
     setSearchProgress({ currentVenue: null, venueIndex: 0, venueTotal: venues.length, totalFound: 0, venueDone: {} });
 
     try {
@@ -78,10 +110,28 @@ export default function App() {
       progRes.forEach((p) => (p.seen || []).forEach((id) => allSeen.add(id)));
       setSeenIds(allSeen);
 
+      if (!keyword && venues.length === 1) {
+        const result = await loadDeckPage(venues[0], year, 0, allSeen);
+        if (result && result.cards.length > 0) {
+          deckRef.current = {
+            venue: venues[0], year, offset: result.nextOffset,
+            total: result.total, hasMore: result.hasMore,
+            loading: false, seenSet: allSeen,
+          };
+          setPapers(result.cards);
+          setVenueProgress({ seen: allSeen.size, total: result.total });
+          setLoading(false);
+          setSearchProgress(null);
+          abortRef.current = null;
+          fetchProgress();
+          return;
+        }
+      }
+
       const res = await fetch("/api/papers/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ venues, year, keyword, limit: 50 }),
+        body: JSON.stringify({ venues, year, keyword }),
         signal: controller.signal,
       });
 
@@ -124,6 +174,9 @@ export default function App() {
                 totalFound: event.total_found,
                 venueDone: { ...prev.venueDone, [event.venue]: event.venue_count },
               }));
+              if (event.venue_total) {
+                setVenueProgress({ seen: allSeen.size, total: event.venue_total });
+              }
             } else if (event.type === "done") {
               setSearchProgress((prev) => ({ ...prev, currentVenue: null }));
             }
@@ -200,12 +253,38 @@ export default function App() {
           /* ignore */
         }
       }
+
+      setVenueProgress((prev) => prev ? { ...prev, seen: prev.seen + 1 } : prev);
       fetchProgress();
     },
     [searchState, incrementToday]
   );
 
-  const handleQueueEmpty = useCallback(() => {
+  const loadMoreFromDeck = useCallback(async () => {
+    const dk = deckRef.current;
+    if (!dk.hasMore || dk.loading || !dk.venue) return false;
+    dk.loading = true;
+    try {
+      const result = await loadDeckPage(dk.venue, dk.year, dk.offset, dk.seenSet);
+      if (result && result.cards.length > 0) {
+        dk.offset = result.nextOffset;
+        dk.hasMore = result.hasMore;
+        setPapers(result.cards);
+        return true;
+      }
+      dk.hasMore = false;
+    } finally {
+      dk.loading = false;
+    }
+    return false;
+  }, [loadDeckPage]);
+
+  const handleQueueEmpty = useCallback(async () => {
+    if (deckRef.current.hasMore) {
+      const loaded = await loadMoreFromDeck();
+      if (loaded) return;
+    }
+
     if (searchState.venues.length > 0) {
       const totalSwiped = todayCount;
       const savedCount = readingList.length;
@@ -224,7 +303,7 @@ export default function App() {
       });
       localStorage.setItem("pt_badges", JSON.stringify(badges));
     }
-  }, [searchState, todayCount, readingList]);
+  }, [searchState, todayCount, readingList, loadMoreFromDeck]);
 
   return (
     <div className="app">
@@ -246,6 +325,7 @@ export default function App() {
             <span className="btn-icon">&#128196;</span>
             Export
           </button>
+          <LoginButton />
         </div>
       </header>
 
@@ -310,6 +390,7 @@ export default function App() {
               papers={papers}
               onSwipe={handleSwipe}
               onQueueEmpty={handleQueueEmpty}
+              venueProgress={venueProgress}
             />
           ) : (
             <div className="empty-state">
