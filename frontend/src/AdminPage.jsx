@@ -773,6 +773,56 @@ function CacheInspector({ styles: S }) {
     setBusy(false);
   };
 
+  const wipeAll = async (opts) => {
+    const lines = [
+      "全カードキャッシュを削除します。本当に実行しますか？",
+      "",
+      `要約 (${stats?.summaries.count || 0}件): ${opts.drop_summaries ? "削除" : "残す"}`,
+      `画像 (${stats?.figures.count || 0}件): ${opts.drop_figures ? "削除" : "残す"}`,
+      `PDF (${stats?.pdf_files.count || 0}件): ${opts.drop_pdfs ? "削除" : "残す"}`,
+      `デッキ (${stats?.decks.count || 0}件): ${opts.drop_decks ? "削除" : "残す"}`,
+      `論文メタデータ (${stats?.papers_metadata.count || 0}件): ${opts.drop_metadata ? "削除" : "残す"}`,
+      "",
+      "この操作は元に戻せません。",
+    ].join("\n");
+    if (!window.confirm(lines)) return;
+    // Second confirm: ask the admin to type DELETE.
+    const phrase = window.prompt('もう一度確認します。実行するには "DELETE" と入力してください：');
+    if (phrase !== "DELETE") return;
+    setBusy(true);
+    try {
+      const q = new URLSearchParams({
+        confirm: "DELETE",
+        drop_summaries: String(!!opts.drop_summaries),
+        drop_figures: String(!!opts.drop_figures),
+        drop_pdfs: String(!!opts.drop_pdfs),
+        drop_decks: String(!!opts.drop_decks),
+        drop_metadata: String(!!opts.drop_metadata),
+      });
+      const r = await fetch(
+        `/api/admin/cache/wipe?${q}`,
+        { method: "POST", credentials: "include" },
+      );
+      if (r.ok) {
+        const data = await r.json();
+        alert(
+          `削除完了:\n` +
+          `要約 ${data.summaries_deleted}, 画像 ${data.figures_deleted} (ファイル ${data.figure_files_deleted}),\n` +
+          `PDF ${data.pdfs_deleted}, デッキ ${data.decks_deleted}, ` +
+          `メタデータ ${data.metadata_cleared ? "クリア" : "保持"}`
+        );
+      } else {
+        const err = await r.text();
+        alert(`失敗: HTTP ${r.status}\n${err}`);
+      }
+      setDetail(null);
+      await reload();
+    } catch (e) {
+      alert(`エラー: ${e.message || e}`);
+    }
+    setBusy(false);
+  };
+
   // Detail modal
   if (detail) {
     const summary = detail.summary || {};
@@ -941,6 +991,26 @@ function CacheInspector({ styles: S }) {
           onClick={cleanupEmpty}
           disabled={busy}
         >空要約を一掃</button>
+        <button
+          type="button"
+          style={{ ...S.smallBtnGhost, color: "#f87171", borderColor: "#f87171" }}
+          onClick={() => wipeAll({
+            drop_summaries: true, drop_figures: true, drop_pdfs: true,
+            drop_decks: false, drop_metadata: false,
+          })}
+          disabled={busy}
+          title="要約・画像・PDFのみ削除（メタとデッキは残す）"
+        >全カードを削除</button>
+        <button
+          type="button"
+          style={{ ...S.smallBtnGhost, color: "#f87171", borderColor: "#f87171" }}
+          onClick={() => wipeAll({
+            drop_summaries: true, drop_figures: true, drop_pdfs: true,
+            drop_decks: true, drop_metadata: true,
+          })}
+          disabled={busy}
+          title="メタ含む全キャッシュを完全初期化（OpenAlex から再取得が必要になる）"
+        >完全初期化</button>
       </div>
 
       {/* List */}

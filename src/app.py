@@ -990,6 +990,83 @@ async def admin_cleanup_empty_summaries(request: Request):
     return {"status": "ok", "removed": removed, "count": len(removed)}
 
 
+@app.post("/api/admin/cache/wipe")
+async def admin_wipe_cache(
+    request: Request,
+    confirm: str | None = None,
+    drop_summaries: bool = True,
+    drop_figures: bool = True,
+    drop_pdfs: bool = True,
+    drop_decks: bool = False,
+    drop_metadata: bool = False,
+):
+    """Bulk-delete cached cards. Requires ``confirm=DELETE`` query param.
+
+    By default removes summaries + figures + PDFs (the GPT/PDF generated
+    output). Decks and the papers metadata cache are preserved unless
+    explicitly opted-in, since rebuilding the metadata requires re-hitting
+    OpenAlex.
+    """
+    auth_service.require_admin(request)
+    if confirm != "DELETE":
+        raise HTTPException(
+            400,
+            "Refusing to wipe without explicit confirm=DELETE query param",
+        )
+
+    counters = {
+        "summaries_deleted": 0,
+        "figures_deleted": 0,
+        "figure_files_deleted": 0,
+        "pdfs_deleted": 0,
+        "decks_deleted": 0,
+        "metadata_cleared": False,
+    }
+
+    if drop_summaries:
+        for pid in storage.list_cached_summary_ids():
+            storage.delete_summary(pid)
+            counters["summaries_deleted"] += 1
+
+    if drop_figures:
+        for pid in storage.list_cached_figure_ids():
+            urls = storage.load_figure_urls(pid) or []
+            for u in urls:
+                await _best_effort_delete_figure_file(u)
+                counters["figure_files_deleted"] += 1
+            storage.delete_figure_urls(pid)
+            counters["figures_deleted"] += 1
+
+    if drop_pdfs:
+        # Local-only: iterate the pdf_cache directory.
+        if not storage.is_vercel():
+            from pathlib import Path
+            pdf_dir = Path("data/pdf_cache")
+            if pdf_dir.exists():
+                for p in pdf_dir.glob("*.pdf"):
+                    try:
+                        p.unlink()
+                        counters["pdfs_deleted"] += 1
+                    except Exception:
+                        pass
+
+    if drop_decks:
+        for d in storage.load_all_decks():
+            v = d.get("venue")
+            y = d.get("year")
+            if v and y:
+                storage.delete_deck(v, y)
+                counters["decks_deleted"] += 1
+
+    if drop_metadata:
+        # Wipe the papers_cache (metadata) — requires re-search to rehydrate.
+        storage.save_papers_cache_raw({})
+        _papers_cache.clear()
+        counters["metadata_cleared"] = True
+
+    return {"status": "ok", **counters}
+
+
 # ---------------------------------------------------------------------------
 # Admin: card editing
 # ---------------------------------------------------------------------------
