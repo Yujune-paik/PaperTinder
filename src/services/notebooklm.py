@@ -94,7 +94,7 @@ def build_session_document(
     """
     parts: list[str] = []
     parts.append(f"# 論文リーディングセッション — {date_str}\n")
-    parts.append(f"このドキュメントは PaperTinder で保存した {len(papers)} 本の論文の要約集です。")
+    parts.append(f"このドキュメントは Mekuru で保存した {len(papers)} 本の論文の要約集です。")
     parts.append("各論文について、核心的主張・手法・新規性・評価・議論をまとめています。\n")
 
     venues = sorted({p.get("venue") or "Unknown" for p in papers})

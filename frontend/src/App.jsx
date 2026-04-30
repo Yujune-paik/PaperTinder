@@ -309,8 +309,8 @@ export default function App() {
     <div className="app">
       <header className="app-header">
         <div className="header-left">
-          <h1 className="logo">PaperTinder</h1>
-          <span className="tagline">Swipe to Read</span>
+          <h1 className="logo">Mekuru</h1>
+          <span className="tagline">めくって、見つける論文</span>
         </div>
         <div className="header-right">
           <StreakBadge todayCount={todayCount} />

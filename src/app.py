@@ -34,7 +34,7 @@ SSE_HEADERS = {
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="PaperTinder", version="0.1.0")
+app = FastAPI(title="Mekuru", version="0.1.0")
 
 
 def _cors_origins() -> list[str]:

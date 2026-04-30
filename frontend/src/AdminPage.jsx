@@ -331,7 +331,7 @@ export default function AdminPage() {
     return (
       <div style={S.container}>
         <div style={S.topBar}>
-          <h1 style={S.logo}>PaperTinder Admin</h1>
+          <h1 style={S.logo}>Mekuru Admin</h1>
         </div>
         <section style={S.card}>
           <p style={S.dimText}>
@@ -347,7 +347,7 @@ export default function AdminPage() {
     return (
       <div style={S.container}>
         <div style={S.topBar}>
-          <h1 style={S.logo}>PaperTinder Admin</h1>
+          <h1 style={S.logo}>Mekuru Admin</h1>
         </div>
         <section style={S.card}>
           <p style={{ marginBottom: 12 }}>管理者ログインが必要です。</p>
@@ -361,7 +361,7 @@ export default function AdminPage() {
     return (
       <div style={S.container}>
         <div style={S.topBar}>
-          <h1 style={S.logo}>PaperTinder Admin</h1>
+          <h1 style={S.logo}>Mekuru Admin</h1>
         </div>
         <section style={S.card}>
           <p>このアカウント（{user.email}）には管理権限がありません。</p>
@@ -377,7 +377,7 @@ export default function AdminPage() {
     return (
       <div style={S.container}>
         <div style={S.topBar}>
-          <h1 style={S.logo}>PaperTinder Admin</h1>
+          <h1 style={S.logo}>Mekuru Admin</h1>
         </div>
         <section style={S.card}>
           <h2 style={S.cardTitle}>
@@ -400,7 +400,7 @@ export default function AdminPage() {
     return (
       <div style={S.container}>
         <div style={S.topBar}>
-          <h1 style={S.logo}>PaperTinder Admin</h1>
+          <h1 style={S.logo}>Mekuru Admin</h1>
         </div>
         <section style={S.card}>
           <h2 style={S.cardTitle}>
@@ -550,7 +550,7 @@ export default function AdminPage() {
     return (
       <div style={S.container}>
         <div style={S.topBar}>
-          <h1 style={S.logo}>PaperTinder Admin</h1>
+          <h1 style={S.logo}>Mekuru Admin</h1>
           <AdminTabs current={view} onChange={setView} styles={S} />
         </div>
         <CacheInspector styles={S} />
@@ -562,7 +562,7 @@ export default function AdminPage() {
   return (
     <div style={S.container}>
       <div style={S.topBar}>
-        <h1 style={S.logo}>PaperTinder Admin</h1>
+        <h1 style={S.logo}>Mekuru Admin</h1>
         <AdminTabs current={view} onChange={setView} styles={S} />
         <span style={S.dimText}>カード管理ダッシュボード</span>
       </div>

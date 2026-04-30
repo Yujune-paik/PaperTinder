@@ -1,4 +1,4 @@
-"""Master list of conferences / journals known to PaperTinder.
+"""Master list of conferences / journals known to Mekuru.
 
 This module is the single source of truth for the available venues.
 The frontend fetches ``/api/venues`` (see ``app.py``) so that the UI

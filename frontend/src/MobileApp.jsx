@@ -330,7 +330,7 @@ export default function MobileApp() {
       {/* ── Contextual Header ── */}
       {activeTab === "search" && (
         <header className="m-header">
-          <h1 className="m-logo">PaperTinder</h1>
+          <h1 className="m-logo">Mekuru</h1>
           <div className="m-header-right">
             <StreakBadge todayCount={todayCount} />
             <button

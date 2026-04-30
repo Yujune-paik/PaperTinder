@@ -1,5 +1,5 @@
 /* ===================================================================
-   PaperTinder Mobile — standalone styles for /mobile route
+   Mekuru Mobile — standalone styles for /mobile route
    Reuses CSS custom properties from index.css (:root)
    =================================================================== */
 
@@ -32,13 +32,13 @@
 }
 
 .m-logo {
-  font-size: 1.2rem;
-  font-weight: 800;
-  background: linear-gradient(135deg, var(--accent), #a29bfe);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  font-family: var(--font);
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text);
   letter-spacing: -0.5px;
+  background: none;
+  -webkit-text-fill-color: currentColor;
 }
 
 .m-header-right {
@@ -69,8 +69,8 @@
   gap: 6px;
   padding: 6px 12px;
   border-radius: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: rgba(0, 0, 0, 0.04);
   color: var(--text-secondary);
   font-family: var(--font);
   font-size: 0.8rem;
@@ -80,7 +80,7 @@
 }
 .m-header-pill:active {
   transform: scale(0.94);
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.1);
 }
 .m-header-pill-icon {
   font-size: 0.9rem;
@@ -115,7 +115,7 @@
   height: 36px;
   border-radius: 50%;
   border: none;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.1);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   color: #fff;
@@ -242,8 +242,8 @@
 .m-chip {
   padding: 10px 18px;
   border-radius: 24px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: rgba(0, 0, 0, 0.04);
   color: var(--text-dim);
   font-family: var(--font);
   font-size: 0.78rem;
@@ -454,14 +454,14 @@
   display: flex;
   flex-direction: column;
   background: var(--bg-card);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.06);
   border-radius: var(--radius-xl);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   overflow: hidden;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 0 0 rgba(0, 0, 0, 0.06);
   transition: visibility 0s 0.3s;
 }
 
@@ -578,7 +578,7 @@
 
 .m-front-claim {
   background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.06);
   border-left: 3px solid var(--accent);
   border-radius: 2px var(--radius-sm) var(--radius-sm) 2px;
   padding: 12px 14px;
@@ -613,7 +613,7 @@
   line-height: 1.45;
   margin: 0;
   padding-top: 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  border-top: 1px solid rgba(0, 0, 0, 0.04);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -637,7 +637,7 @@
 .m-front-loading-bar {
   width: 100%;
   height: 3px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.06);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -659,8 +659,8 @@
 .m-front-retry {
   padding: 8px 16px;
   border-radius: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: rgba(0, 0, 0, 0.04);
   color: var(--accent);
   font-family: var(--font);
   font-size: 0.75rem;
@@ -700,14 +700,14 @@
   display: flex;
   flex-direction: column;
   background: var(--bg);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.06);
   border-radius: var(--radius-xl);
   overflow: hidden;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
   transform: rotateY(180deg);
   touch-action: pan-y;
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 0 0 rgba(0, 0, 0, 0.06);
 }
 
 .m-back-swipe-hint {
@@ -744,7 +744,7 @@
   align-items: center;
   gap: 10px;
   padding: 12px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   flex-shrink: 0;
   background: var(--glass-bg);
   backdrop-filter: blur(16px);
@@ -816,7 +816,7 @@
   border-radius: var(--radius-sm);
   padding: 10px 12px;
   background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.04);
 }
 .m-back-section-claim {
   background: rgba(108, 92, 231, 0.06);
@@ -1103,7 +1103,7 @@
   height: 36px;
   border-radius: 10px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(0, 0, 0, 0.04);
   color: var(--text-secondary);
   font-size: 1.1rem;
   cursor: pointer;
@@ -1149,7 +1149,7 @@
   gap: 14px;
   padding: 14px;
   background: var(--bg-card);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.05);
   border-radius: var(--radius);
   min-height: 64px;
   transition: all 0.15s ease;
@@ -1208,7 +1208,7 @@
   flex-shrink: 0;
   padding-top: 16px;
   margin-top: auto;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
 }
 
 .m-saved-share-label {
@@ -1234,7 +1234,7 @@
   width: 100%;
   padding: 14px;
   border-radius: var(--radius);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.06);
   background: var(--bg-card);
   color: var(--text);
   font-family: var(--font);
@@ -1263,7 +1263,7 @@
   align-items: center;
   justify-content: center;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(0, 0, 0, 0.04);
 }
 
 .m-saved-share-btn-text {
@@ -1476,7 +1476,7 @@
   max-height: 90vh;
   border-radius: var(--radius-xl) var(--radius-xl) 0 0;
   animation: m-slide-up 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.06);
   border-bottom: none;
 }
 @keyframes m-slide-up {
@@ -1543,9 +1543,9 @@
   width: 40px;
   height: 40px;
   border-radius: 12px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.08);
-  color: var(--text-dim);
+  background: #ffffff;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
   cursor: pointer;
   font-size: 1.05rem;
 }
@@ -1555,24 +1555,27 @@
   align-items: flex-start;
   gap: 6px;
   padding: 14px;
-  background: rgba(255,255,255,0.03);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
   border-radius: 12px;
   font-size: 0.85rem;
-  color: var(--text-dim);
+  color: var(--text-secondary);
   margin-bottom: 12px;
 }
 
 .m-venue-settings-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.7);
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   display: flex;
   align-items: flex-end;
   justify-content: center;
   z-index: 2000;
 }
 .m-venue-settings-modal {
-  background: var(--panel, #14141c);
+  background: #ffffff;
   width: 100%;
   max-height: 90vh;
   border-top-left-radius: 18px;
@@ -1581,40 +1584,59 @@
   flex-direction: column;
   overflow: hidden;
   padding-bottom: env(safe-area-inset-bottom, 0px);
+  box-shadow: var(--shadow-lg);
 }
 .m-venue-settings-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 18px;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border);
 }
-.m-venue-settings-header h3 { margin: 0; font-size: 1rem; }
+.m-venue-settings-header h3 {
+  margin: 0;
+  font-size: 1.0625rem;
+  color: var(--text);
+  font-weight: 700;
+  letter-spacing: -0.165px;
+}
 .m-venue-settings-close {
   background: transparent;
   border: none;
-  color: var(--text-dim);
+  color: var(--text-secondary);
   font-size: 1.4rem;
   cursor: pointer;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.m-venue-settings-close:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text);
 }
 .m-venue-settings-note {
   padding: 10px 18px;
-  color: var(--text-dim);
+  color: var(--text-secondary);
   font-size: 0.78rem;
-  border-bottom: 1px solid rgba(255,255,255,0.04);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
 }
 .m-venue-settings-body {
-  padding: 14px 18px 18px;
+  padding: 16px 18px 18px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 .m-venue-settings-group-label {
   font-size: 0.72rem;
   text-transform: uppercase;
-  letter-spacing: 1px;
-  color: var(--text-dim);
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  font-weight: 600;
   margin-bottom: 6px;
 }
 .m-venue-settings-items { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -1622,36 +1644,42 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 12px;
+  padding: 8px 14px;
   border-radius: 999px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.08);
-  font-size: 0.85rem;
+  background: #ffffff;
+  border: 1px solid #dddddd;
+  color: var(--text);
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 .m-venue-settings-item.active {
-  background: rgba(108,92,231,0.25);
-  border-color: var(--accent, #6c5ce7);
-  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
 }
 .m-venue-settings-footer {
   display: flex;
   gap: 10px;
   padding: 12px 18px;
-  border-top: 1px solid rgba(255,255,255,0.06);
+  border-top: 1px solid var(--border);
 }
 .m-venue-settings-cancel, .m-venue-settings-save {
   flex: 1;
   padding: 10px;
-  border-radius: 10px;
-  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
   font-size: 0.9rem;
+  font-weight: 600;
   cursor: pointer;
 }
-.m-venue-settings-cancel { background: transparent; color: var(--text-dim); }
+.m-venue-settings-cancel {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text);
+}
 .m-venue-settings-save {
-  background: var(--accent, #6c5ce7);
-  border-color: var(--accent, #6c5ce7);
-  color: #fff;
-  font-weight: 600;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
 }
 
