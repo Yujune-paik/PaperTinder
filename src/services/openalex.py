@@ -6,6 +6,8 @@ to keyword search + year filter for other venues.
 from __future__ import annotations
 
 import logging
+import re
+from collections import Counter
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -384,6 +386,13 @@ _SEARCH_QUERY_OVERRIDES: dict[str, str] = {
     "Interaction": "情報処理学会 インタラクション",
 }
 
+# Venues whose proceedings DOI changes every year. For these we MUST use
+# DOI-prefix filtering — falling back to a 3-letter keyword search on
+# OpenAlex (e.g. "CHI") matches thousands of unrelated papers
+# (chi-squared, China, etc.). When the year isn't in our hardcoded table
+# we attempt runtime discovery; if that fails we return 0 papers.
+_ACM_YEAR_KEYED_VENUES = set(_ACM_PROCEEDINGS_DOI.keys())
+
 
 def _get_venue_strategy(venue: str, year: int):
     """Determine the best search strategy for a venue+year combination."""
@@ -405,7 +414,64 @@ def _get_venue_strategy(venue: str, year: int):
         if upper == search_name.upper():
             return "search", query
 
+    # ACM venue but the year isn't in our table — caller should attempt
+    # discovery instead of falling through to a too-broad keyword search.
+    for conf_name in _ACM_YEAR_KEYED_VENUES:
+        if upper == conf_name.upper():
+            return "acm_unknown_year", conf_name
+
     return "search", None
+
+
+async def _discover_acm_proceedings_doi(
+    client: httpx.AsyncClient, venue: str, year: int,
+) -> str | None:
+    """Probe OpenAlex to find the ACM proceedings DOI prefix for a new year.
+
+    Strategy: filter to ACM publisher (``10.1145``) + year, search by venue
+    name. If a clear majority of returned papers share the same
+    ``10.1145/XXXXXXX`` prefix, we treat that as the proceedings DOI for
+    this year. We require ≥3 hits with ≥60% share to avoid noise.
+    """
+    params = {
+        "search": venue,
+        "filter": f"publication_year:{year},doi_starts_with:10.1145",
+        "per_page": 25,
+        "select": "id,doi,title",
+        "mailto": POLITE_MAIL,
+    }
+    try:
+        resp = await client.get(f"{BASE_URL}/works", params=params)
+        if resp.status_code != 200:
+            logger.warning(f"discovery: OpenAlex {resp.status_code} for {venue} {year}")
+            return None
+        results = resp.json().get("results", [])
+    except Exception:
+        logger.exception(f"discovery: request failed for {venue} {year}")
+        return None
+
+    counter: Counter[str] = Counter()
+    for w in results:
+        doi = (w.get("doi") or "").lower().replace("https://doi.org/", "").strip()
+        m = re.match(r"^10\.1145/(\d+)\.\d+", doi)
+        if m:
+            counter[f"10.1145/{m.group(1)}"] += 1
+
+    if not counter:
+        logger.info(f"discovery: no candidates for {venue} {year}")
+        return None
+
+    prefix, count = counter.most_common(1)[0]
+    total = sum(counter.values())
+    share = count / total if total else 0
+    if count >= 3 and share >= 0.6:
+        logger.info(f"discovery: {venue} {year} -> {prefix} ({count}/{total}, {share:.0%})")
+        return prefix
+    logger.info(
+        f"discovery: low confidence for {venue} {year} "
+        f"(top={prefix} {count}/{total}, share={share:.0%})"
+    )
+    return None
 
 
 async def stream_search_venue(
@@ -423,6 +489,26 @@ async def stream_search_venue(
     logger.info(f"OpenAlex: venue={venue} year={year} strategy={strategy} param={param}")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
+        if strategy == "acm_unknown_year":
+            # ACM venue without a hardcoded prefix for this year. Probe
+            # OpenAlex to find the proceedings DOI; if we can't, refuse to
+            # fall back to keyword search (would return thousands of
+            # unrelated chi-squared / China papers).
+            discovered = await _discover_acm_proceedings_doi(client, param, year)
+            if discovered:
+                # Cache for the rest of this process — subsequent searches in
+                # the same backend won't re-probe OpenAlex.
+                _ACM_PROCEEDINGS_DOI.setdefault(param, {})[year] = discovered
+                async for batch in _fetch_by_doi_prefix(client, discovered, year, keyword, limit, venue):
+                    yield batch
+            else:
+                logger.warning(
+                    f"{venue} {year}: proceedings not discoverable. "
+                    f"Returning 0 papers instead of running a too-broad keyword search."
+                )
+                yield {"papers": [], "venue_total": 0, "unsupported_year": True}
+            return
+
         if strategy == "doi_prefix":
             async for batch in _fetch_by_doi_prefix(client, param, year, keyword, limit, venue):
                 yield batch

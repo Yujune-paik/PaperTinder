@@ -61,12 +61,40 @@ _BROWSER_UA = (
 )
 UNPAYWALL_EMAIL = "papertinder@example.com"
 
+# Some publishers (notably ACM dl.acm.org) block requests that don't look
+# like a real browser. Send the full set of headers Chrome ships by default.
+_BROWSER_HEADERS = {
+    "User-Agent": _BROWSER_UA,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9,ja;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+_BOT_PROTECTED_HOSTS = ("dl.acm.org", "ieeexplore.ieee.org", "link.springer.com")
+
+
+def _is_bot_protected(url: str) -> bool:
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(url).netloc.lower()
+        return any(host == h or host.endswith("." + h) for h in _BOT_PROTECTED_HOSTS)
+    except Exception:
+        return False
+
 
 # ── PDF Download ───────────────────────────────────────────────────────
 
 async def _download_from_url(client: httpx.AsyncClient, url: str, pdf_path: Path) -> bool:
     try:
-        resp = await client.get(url)
+        if _is_bot_protected(url):
+            resp = await client.get(url, headers=_BROWSER_HEADERS)
+        else:
+            resp = await client.get(url)
         resp.raise_for_status()
 
         content_type = resp.headers.get("content-type", "")
@@ -104,6 +132,33 @@ async def _get_s2_oa_url(client: httpx.AsyncClient, doi: str | None) -> str | No
         return None
 
 
+def _bare_doi(doi: str | None) -> str | None:
+    if not doi:
+        return None
+    return doi.replace("https://doi.org/", "").replace("http://doi.org/", "").strip()
+
+
+def _publisher_pdf_urls(doi: str | None) -> list[str]:
+    """Return likely direct-PDF URLs based on the DOI prefix.
+
+    Many publishers expose an OA PDF at a deterministic path that OpenAlex
+    sometimes fails to populate. Returning candidates here lets us try them
+    even when ``pdf_url`` from upstream is missing or points at HTML.
+    """
+    bare = _bare_doi(doi)
+    if not bare:
+        return []
+    candidates: list[str] = []
+    # ACM Digital Library — most CHI/UIST/CSCW post-2024 are OA
+    if bare.startswith("10.1145/"):
+        candidates.append(f"https://dl.acm.org/doi/pdf/{bare}")
+    # arXiv (rare but happens for arXiv DOIs)
+    if bare.startswith("10.48550/arXiv."):
+        arxiv_id = bare[len("10.48550/arXiv."):]
+        candidates.append(f"https://arxiv.org/pdf/{arxiv_id}.pdf")
+    return candidates
+
+
 async def download_pdf(url: str | None, paper_id: str, doi: str | None = None) -> Path | None:
     """Download a PDF. Works with pdfminer, MarkItDown, pypdfium2, or PyMuPDF."""
     if not (_HAS_PDFMINER or _HAS_MARKITDOWN or _HAS_PDFIUM or _HAS_PYMUPDF):
@@ -121,6 +176,14 @@ async def download_pdf(url: str | None, paper_id: str, doi: str | None = None) -
     async with httpx.AsyncClient(follow_redirects=True, timeout=30.0, headers={"User-Agent": _BROWSER_UA}) as client:
         if url and await _download_from_url(client, url, pdf_path):
             return pdf_path
+
+        # Publisher-specific direct-PDF guesses (e.g. dl.acm.org/doi/pdf/...)
+        for pub_url in _publisher_pdf_urls(doi):
+            if pub_url == url:
+                continue
+            logger.info(f"Trying publisher direct PDF: {pub_url}")
+            if await _download_from_url(client, pub_url, pdf_path):
+                return pdf_path
 
         s2_url = await _get_s2_oa_url(client, doi)
         if s2_url and s2_url != url:

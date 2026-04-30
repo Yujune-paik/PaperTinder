@@ -11,7 +11,7 @@ import os
 import secrets
 from datetime import datetime, timezone
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 
 from src.services import storage
 
@@ -24,6 +24,17 @@ SESSION_TTL_SECONDS = 60 * 60 * 24 * 30  # 30 days
 def _client_id() -> str | None:
     cid = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
     return cid or None
+
+
+def _admin_emails() -> set[str]:
+    raw = os.environ.get("ADMIN_EMAILS", "")
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}
+
+
+def _is_admin_email(email: str | None) -> bool:
+    if not email:
+        return False
+    return email.strip().lower() in _admin_emails()
 
 
 def is_configured() -> bool:
@@ -74,17 +85,25 @@ def login_with_google(id_token_str: str) -> tuple[dict, str] | None:
         return None
 
     existing = storage.load_user(google_id) or {}
+    email = claims.get("email", existing.get("email", ""))
     user = {
         "google_id": google_id,
-        "email": claims.get("email", existing.get("email", "")),
+        "email": email,
         "name": claims.get("name", existing.get("name")),
         "picture": claims.get("picture", existing.get("picture")),
         "created_at": existing.get("created_at") or datetime.now(timezone.utc).isoformat(),
+        "role": "admin" if _is_admin_email(email) else existing.get("role", "user"),
     }
+    # Re-evaluate admin on every login so ADMIN_EMAILS changes take effect.
+    if _is_admin_email(email):
+        user["role"] = "admin"
+    elif user.get("role") == "admin" and not _is_admin_email(email):
+        # Previously admin but email was removed from ADMIN_EMAILS → demote.
+        user["role"] = "user"
     storage.save_user(user)
 
     session_id = secrets.token_urlsafe(32)
-    storage.save_session(session_id, google_id)
+    storage.save_session(session_id, google_id, ttl_seconds=SESSION_TTL_SECONDS)
     return user, session_id
 
 
@@ -103,3 +122,22 @@ def logout(request: Request) -> None:
     session_id = request.cookies.get(SESSION_COOKIE)
     if session_id:
         storage.delete_session(session_id)
+
+
+def is_admin(user: dict | None) -> bool:
+    if not user:
+        return False
+    if user.get("role") == "admin":
+        return True
+    # Fallback for users created before the role field was introduced.
+    return _is_admin_email(user.get("email"))
+
+
+def require_admin(request: Request) -> dict:
+    """Raise 401/403 unless the request carries a valid admin session."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(401, "Login required")
+    if not is_admin(user):
+        raise HTTPException(403, "Admin access required")
+    return user

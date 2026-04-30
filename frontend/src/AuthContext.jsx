@@ -3,6 +3,7 @@ import { GoogleOAuthProvider } from "@react-oauth/google";
 
 const AuthContext = createContext({
   user: null,
+  isAdmin: false,
   clientId: "",
   enabled: false,
   ready: false,
@@ -49,6 +50,20 @@ export function AuthProvider({ children }) {
   }, [refresh]);
 
   const login = useCallback(async (credential) => {
+    // Snapshot the anonymous reading list so we can merge it into the user's
+    // account after login (so that a solo user who signs in later keeps what
+    // they had saved while logged out).
+    let preLoginItems = [];
+    try {
+      const snap = await fetch("/api/reading-list", { credentials: "include" });
+      if (snap.ok) {
+        const snapData = await snap.json();
+        preLoginItems = Array.isArray(snapData.items) ? snapData.items : [];
+      }
+    } catch {
+      /* ignore */
+    }
+
     const res = await fetch("/api/auth/google", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -58,6 +73,20 @@ export function AuthProvider({ children }) {
     if (!res.ok) throw new Error("login failed");
     const data = await res.json();
     setUser(data.user);
+
+    if (preLoginItems.length > 0) {
+      try {
+        await fetch("/api/reading-list/merge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ items: preLoginItems }),
+        });
+      } catch {
+        /* merge is best-effort */
+      }
+    }
+
     return data.user;
   }, []);
 
@@ -68,6 +97,7 @@ export function AuthProvider({ children }) {
 
   const value = {
     user,
+    isAdmin: !!user?.is_admin,
     clientId: config.client_id,
     enabled: !!config.enabled,
     ready,

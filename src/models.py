@@ -52,6 +52,7 @@ class User(BaseModel):
     name: str | None = None
     picture: str | None = None
     created_at: str | None = None
+    role: str = "user"  # "user" | "admin"
 
 
 class UserPreferences(BaseModel):

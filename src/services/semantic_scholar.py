@@ -144,11 +144,14 @@ async def stream_search_venues(
         venue_papers: list[PaperMeta] = []
         venue_total_from_api: int | None = None
         source_used = "openalex"
+        venue_unsupported = False
 
         async for batch_dict in openalex.stream_search_venue(venue, year, keyword, limit_per_venue):
             batch = batch_dict.get("papers", [])
             if "venue_total" in batch_dict:
                 venue_total_from_api = batch_dict["venue_total"]
+            if batch_dict.get("unsupported_year"):
+                venue_unsupported = True
 
             new_papers = [p for p in batch if p.paper_id not in seen_ids]
             for p in new_papers:
@@ -164,7 +167,12 @@ async def stream_search_venues(
                     "total_found": total_found,
                 }
 
-        if not venue_papers:
+        # Only run the S2 fallback when OpenAlex genuinely produced 0 results
+        # for a venue we DO know how to search. If OpenAlex flagged the year
+        # as unsupported (e.g. CHI 2026 before proceedings exist), S2 keyword
+        # search would just pull thousands of unrelated papers — skip it and
+        # tell the user explicitly.
+        if not venue_papers and not venue_unsupported:
             logger.info(f"OpenAlex returned 0 for {venue} {year}, trying Semantic Scholar")
             source_used = "semantic_scholar"
             async for batch in _s2_search_venue(venue, year, keyword, min(limit_per_venue, 30)):
@@ -181,6 +189,17 @@ async def stream_search_venues(
                         "venue": venue,
                         "total_found": total_found,
                     }
+
+        if venue_unsupported and not venue_papers:
+            yield {
+                "type": "venue_unsupported",
+                "venue": venue,
+                "year": year,
+                "message": (
+                    f"{venue} {year} のプロシーディングは登録されていません "
+                    f"（DOI が未発行 / OpenAlex に未収録）。"
+                ),
+            }
 
         venue_count = len(venue_papers)
         logger.info(

@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useAuth } from "./AuthContext";
+import LoginButton from "./components/LoginButton";
 
 const TARGETS = [
   { venue: "CHI",         years: [2022, 2023, 2024, 2025, 2026] },
@@ -28,6 +30,8 @@ const FILTER_OPTIONS = [
 ];
 
 export default function AdminPage() {
+  const { user, isAdmin, ready: authReady, enabled: authEnabled } = useAuth();
+
   const [view, setView] = useState("decks");
   const [decks, setDecks] = useState([]);
   const [loadingDecks, setLoadingDecks] = useState(true);
@@ -57,7 +61,11 @@ export default function AdminPage() {
     setLoadingDecks(false);
   }, []);
 
-  useEffect(() => { fetchDecks(); }, [fetchDecks]);
+  useEffect(() => {
+    if (!authReady) return;
+    if (!isAdmin) { setLoadingDecks(false); return; }
+    fetchDecks();
+  }, [authReady, isAdmin, fetchDecks]);
 
   const deckMap = {};
   decks.forEach((d) => { deckMap[`${d.venue}_${d.year}`] = d; });
@@ -161,7 +169,18 @@ export default function AdminPage() {
     setBuildLog([]);
   };
 
-  // --- Upload ---
+  // --- Figure ops ---
+  const applyCardFigs = (paperId, urls) => {
+    setCards((prev) => prev.map((c) =>
+      c.paper_id === paperId
+        ? { ...c, figure_urls: urls, has_figures: urls.length > 0 }
+        : c
+    ));
+    setEditCard((ec) => (ec && ec.paper_id === paperId
+      ? { ...ec, figure_urls: urls, has_figures: urls.length > 0 }
+      : ec));
+  };
+
   const handleUpload = async (paperId, file) => {
     setUploading((prev) => ({ ...prev, [paperId]: true }));
     try {
@@ -169,15 +188,125 @@ export default function AdminPage() {
       formData.append("file", file);
       const res = await fetch(`/api/admin/figures/${encodeURIComponent(paperId)}`, {
         method: "POST",
+        credentials: "include",
         body: formData,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const currentUrls = cards.find((c) => c.paper_id === paperId)?.figure_urls || [];
+      applyCardFigs(paperId, [...currentUrls, data.url]);
+    } catch { /* ignore */ }
+    setUploading((prev) => ({ ...prev, [paperId]: false }));
+  };
+
+  const handleDeleteFigure = async (paperId, index) => {
+    if (!window.confirm(`この画像を削除しますか？ (${index + 1}枚目)`)) return;
+    try {
+      const res = await fetch(
+        `/api/admin/figures/${encodeURIComponent(paperId)}/${index}`,
+        { method: "DELETE", credentials: "include" },
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      applyCardFigs(paperId, data.figure_urls || []);
+    } catch { /* ignore */ }
+  };
+
+  const handleReorderFigure = async (paperId, from, to) => {
+    const urls = cards.find((c) => c.paper_id === paperId)?.figure_urls || [];
+    if (to < 0 || to >= urls.length) return;
+    const order = urls.map((_, i) => i);
+    [order[from], order[to]] = [order[to], order[from]];
+    try {
+      const res = await fetch(
+        `/api/admin/figures/${encodeURIComponent(paperId)}/reorder`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ order }),
+        },
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      applyCardFigs(paperId, data.figure_urls || []);
+    } catch { /* ignore */ }
+  };
+
+  const handleReplaceFigure = async (paperId, index, file) => {
+    setUploading((prev) => ({ ...prev, [paperId]: true }));
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(
+        `/api/admin/figures/${encodeURIComponent(paperId)}/${index}`,
+        { method: "PUT", credentials: "include", body: formData },
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      applyCardFigs(paperId, data.figure_urls || []);
+    } catch { /* ignore */ }
+    setUploading((prev) => ({ ...prev, [paperId]: false }));
+  };
+
+  // --- Summary ops ---
+  const handleSaveSummary = async (paperId, summary) => {
+    try {
+      const res = await fetch(`/api/admin/summary/${encodeURIComponent(paperId)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ summary }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setCards((prev) => prev.map((c) =>
         c.paper_id === paperId
-          ? { ...c, figure_urls: [...(c.figure_urls || []), data.url], has_figures: true }
+          ? { ...c, summary: data.summary, has_summary: true }
           : c
       ));
+      setEditCard((ec) => (ec && ec.paper_id === paperId
+        ? { ...ec, summary: data.summary, has_summary: true }
+        : ec));
+    } catch { /* ignore */ }
+  };
+
+  const handleRebuildCard = async (paperId, opts) => {
+    const label = [
+      opts.summary && "要約",
+      opts.figures && "画像",
+    ].filter(Boolean).join(" + ");
+    if (!window.confirm(`${label} を再生成しますか？ (GPT-4o を消費します)`)) return;
+    setUploading((prev) => ({ ...prev, [paperId]: true }));
+    try {
+      const res = await fetch(`/api/admin/rebuild/${encodeURIComponent(paperId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(opts),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setCards((prev) => prev.map((c) =>
+        c.paper_id === paperId
+          ? {
+              ...c,
+              figure_urls: data.figure_urls || c.figure_urls || [],
+              has_figures: (data.figure_urls || []).length > 0,
+              summary: data.summary || c.summary,
+              has_summary: !!data.summary,
+            }
+          : c
+      ));
+      setEditCard((ec) => (ec && ec.paper_id === paperId
+        ? {
+            ...ec,
+            figure_urls: data.figure_urls || ec.figure_urls || [],
+            has_figures: (data.figure_urls || []).length > 0,
+            summary: data.summary || ec.summary,
+            has_summary: !!data.summary,
+          }
+        : ec));
     } catch { /* ignore */ }
     setUploading((prev) => ({ ...prev, [paperId]: false }));
   };
@@ -188,6 +317,61 @@ export default function AdminPage() {
   // ======================
   // RENDER
   // ======================
+
+  // Admin gate ----------------------------------------------------------
+  if (!authReady) {
+    return (
+      <div style={S.container}>
+        <div style={S.emptyState}>読み込み中...</div>
+      </div>
+    );
+  }
+
+  if (!authEnabled) {
+    return (
+      <div style={S.container}>
+        <div style={S.topBar}>
+          <h1 style={S.logo}>PaperTinder Admin</h1>
+        </div>
+        <section style={S.card}>
+          <p style={S.dimText}>
+            Google Sign-In が無効です。サーバに <code>GOOGLE_CLIENT_ID</code> と{" "}
+            <code>ADMIN_EMAILS</code> を設定してください。
+          </p>
+        </section>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div style={S.container}>
+        <div style={S.topBar}>
+          <h1 style={S.logo}>PaperTinder Admin</h1>
+        </div>
+        <section style={S.card}>
+          <p style={{ marginBottom: 12 }}>管理者ログインが必要です。</p>
+          <LoginButton />
+        </section>
+      </div>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <div style={S.container}>
+        <div style={S.topBar}>
+          <h1 style={S.logo}>PaperTinder Admin</h1>
+        </div>
+        <section style={S.card}>
+          <p>このアカウント（{user.email}）には管理権限がありません。</p>
+          <p style={S.dimText}>
+            管理者に連絡して <code>ADMIN_EMAILS</code> に追加してもらってください。
+          </p>
+        </section>
+      </div>
+    );
+  }
 
   if (buildPhase && buildPhase !== "done") {
     return (
@@ -236,82 +420,19 @@ export default function AdminPage() {
 
   // --- Card detail modal ---
   if (editCard) {
-    const c = editCard;
-    const summaryEntries = c.summary ? Object.entries(c.summary).filter(([, v]) => v) : [];
     return (
-      <div style={S.container}>
-        <div style={S.topBar}>
-          <button onClick={() => setEditCard(null)} style={S.backBtn}>&larr; 戻る</button>
-          <h1 style={S.logo}>カード詳細</h1>
-        </div>
-        <section style={S.card}>
-          <div style={S.detailHeader}>
-            <span style={S.badge}>{c.venue} {c.year}</span>
-            {!c.has_figures && <span style={S.badgeDanger}>画像なし</span>}
-            {!c.has_summary && <span style={S.badgeWarn}>要約なし</span>}
-          </div>
-          <h2 style={{ ...S.cardTitle, fontSize: "1.1rem" }}>{c.title}</h2>
-          <div style={S.detailAuthors}>
-            {(c.authors || []).slice(0, 5).join(", ")}
-            {(c.authors || []).length > 5 && " et al."}
-          </div>
-
-          {/* Figures */}
-          <div style={S.detailSection}>
-            <h3 style={S.detailLabel}>画像</h3>
-            {(c.figure_urls || []).length > 0 ? (
-              <div style={S.figGrid}>
-                {c.figure_urls.map((url, i) => (
-                  <img key={i} src={url} alt={`fig${i}`} style={S.figImg} />
-                ))}
-              </div>
-            ) : (
-              <p style={S.dimText}>画像がありません</p>
-            )}
-            <label style={S.uploadLabel}>
-              <input
-                type="file"
-                accept="image/*"
-                style={{ display: "none" }}
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handleUpload(c.paper_id, f).then(() => {
-                    openDeck(activeDeck.venue, activeDeck.year).then(() => {
-                      const updated = cards.find((x) => x.paper_id === c.paper_id);
-                      if (updated) setEditCard(updated);
-                    });
-                  });
-                }}
-              />
-              <span style={S.uploadBtn}>
-                {uploading[c.paper_id] ? "アップロード中..." : "画像を追加"}
-              </span>
-            </label>
-          </div>
-
-          {/* Summary */}
-          <div style={S.detailSection}>
-            <h3 style={S.detailLabel}>要約</h3>
-            {summaryEntries.length > 0 ? (
-              summaryEntries.map(([key, val]) => (
-                <div key={key} style={S.summaryBlock}>
-                  <div style={S.summaryKey}>{key}</div>
-                  <div style={S.summaryVal}>{val}</div>
-                </div>
-              ))
-            ) : (
-              <p style={S.dimText}>要約がありません</p>
-            )}
-          </div>
-
-          {c.abstract && (
-            <div style={S.detailSection}>
-              <h3 style={S.detailLabel}>Abstract</h3>
-              <p style={S.abstractText}>{c.abstract}</p>
-            </div>
-          )}
-        </section>
-      </div>
+      <CardDetailEditor
+        card={editCard}
+        uploading={!!uploading[editCard.paper_id]}
+        onBack={() => setEditCard(null)}
+        onUpload={(file) => handleUpload(editCard.paper_id, file)}
+        onDeleteFigure={(i) => handleDeleteFigure(editCard.paper_id, i)}
+        onReorderFigure={(from, to) => handleReorderFigure(editCard.paper_id, from, to)}
+        onReplaceFigure={(i, file) => handleReplaceFigure(editCard.paper_id, i, file)}
+        onSaveSummary={(summary) => handleSaveSummary(editCard.paper_id, summary)}
+        onRebuild={(opts) => handleRebuildCard(editCard.paper_id, opts)}
+        styles={S}
+      />
     );
   }
 
@@ -424,11 +545,25 @@ export default function AdminPage() {
     );
   }
 
+  // --- Cache inspector tab ---
+  if (view === "cache") {
+    return (
+      <div style={S.container}>
+        <div style={S.topBar}>
+          <h1 style={S.logo}>PaperTinder Admin</h1>
+          <AdminTabs current={view} onChange={setView} styles={S} />
+        </div>
+        <CacheInspector styles={S} />
+      </div>
+    );
+  }
+
   // --- Decks overview ---
   return (
     <div style={S.container}>
       <div style={S.topBar}>
         <h1 style={S.logo}>PaperTinder Admin</h1>
+        <AdminTabs current={view} onChange={setView} styles={S} />
         <span style={S.dimText}>カード管理ダッシュボード</span>
       </div>
 
@@ -498,6 +633,604 @@ export default function AdminPage() {
     </div>
   );
 }
+
+// ============================================================
+// Tab nav for switching between admin views
+// ============================================================
+function AdminTabs({ current, onChange, styles: S }) {
+  const tabs = [
+    { key: "decks", label: "デッキ" },
+    { key: "cache", label: "キャッシュ" },
+  ];
+  return (
+    <div style={{ display: "flex", gap: 6 }}>
+      {tabs.map((t) => (
+        <button
+          key={t.key}
+          type="button"
+          onClick={() => onChange(t.key)}
+          style={{
+            ...S.smallBtn,
+            ...(current === t.key
+              ? { background: "#3b82f6", color: "#fff", borderColor: "#3b82f6" }
+              : {}),
+          }}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+
+// ============================================================
+// Cache inspector — admin-only view of raw cache state
+// ============================================================
+function fmtBytes(n) {
+  if (!n) return "0 B";
+  const u = ["B", "KB", "MB", "GB"];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${u[i]}`;
+}
+
+function CacheInspector({ styles: S }) {
+  const [stats, setStats] = useState(null);
+  const [papers, setPapers] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [filter, setFilter] = useState("with_summary");
+  const [search, setSearch] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [detail, setDetail] = useState(null); // {paper_id, ...}
+  const [busy, setBusy] = useState(false);
+
+  const PAGE = 50;
+
+  const buildQuery = useCallback(() => {
+    const q = new URLSearchParams();
+    if (filter === "with_summary") q.set("has_summary", "true");
+    if (filter === "no_summary") q.set("has_summary", "false");
+    if (filter === "empty_summary") q.set("has_summary", "true");
+    if (filter === "with_figures") q.set("has_figures", "true");
+    if (filter === "no_figures") q.set("has_figures", "false");
+    if (filter === "metadata_only") q.set("has_metadata", "true");
+    if (search.trim()) q.set("search", search.trim());
+    q.set("offset", String(offset));
+    q.set("limit", String(PAGE));
+    return q.toString();
+  }, [filter, search, offset]);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [statsRes, papersRes] = await Promise.all([
+        fetch("/api/admin/cache/stats", { credentials: "include" }),
+        fetch(`/api/admin/cache/papers?${buildQuery()}`, { credentials: "include" }),
+      ]);
+      if (statsRes.ok) setStats(await statsRes.json());
+      if (papersRes.ok) {
+        const data = await papersRes.json();
+        let list = data.papers || [];
+        if (filter === "empty_summary") list = list.filter((p) => p.summary_empty);
+        setPapers(list);
+        setTotal(data.total || 0);
+      }
+    } catch { /* ignore */ }
+    setLoading(false);
+  }, [buildQuery, filter]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const openDetail = async (paperId) => {
+    try {
+      const r = await fetch(
+        `/api/admin/cache/papers/${encodeURIComponent(paperId)}`,
+        { credentials: "include" },
+      );
+      if (r.ok) setDetail(await r.json());
+    } catch { /* ignore */ }
+  };
+
+  const dropPaper = async (paperId, opts) => {
+    const label = [
+      opts.drop_summary && "要約",
+      opts.drop_figures && "画像",
+      opts.drop_pdf && "PDF",
+    ].filter(Boolean).join(" + ");
+    if (!window.confirm(`${paperId} の${label}キャッシュを削除しますか？`)) return;
+    setBusy(true);
+    try {
+      const q = new URLSearchParams(
+        Object.fromEntries(Object.entries(opts).map(([k, v]) => [k, String(v)])),
+      );
+      await fetch(
+        `/api/admin/cache/papers/${encodeURIComponent(paperId)}?${q}`,
+        { method: "DELETE", credentials: "include" },
+      );
+      setDetail(null);
+      await reload();
+    } catch { /* ignore */ }
+    setBusy(false);
+  };
+
+  const cleanupEmpty = async () => {
+    if (!window.confirm("空の要約キャッシュをすべて削除しますか？")) return;
+    setBusy(true);
+    try {
+      const r = await fetch(
+        "/api/admin/cache/cleanup-empty-summaries",
+        { method: "POST", credentials: "include" },
+      );
+      if (r.ok) {
+        const data = await r.json();
+        alert(`${data.count} 件削除しました`);
+      }
+      await reload();
+    } catch { /* ignore */ }
+    setBusy(false);
+  };
+
+  // Detail modal
+  if (detail) {
+    const summary = detail.summary || {};
+    return (
+      <div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <button onClick={() => setDetail(null)} style={S.backBtn}>&larr; 戻る</button>
+          <span style={{ ...S.dimText, alignSelf: "center" }}>{detail.paper_id}</span>
+        </div>
+        <section style={S.card}>
+          {detail.metadata ? (
+            <>
+              <h2 style={{ ...S.cardTitle, fontSize: "1.05rem" }}>{detail.metadata.title}</h2>
+              <div style={S.detailAuthors}>
+                {(detail.metadata.authors || []).slice(0, 5).join(", ")}
+                {(detail.metadata.authors || []).length > 5 && " et al."}
+                {" — "}
+                <span>{detail.metadata.venue} {detail.metadata.year}</span>
+              </div>
+            </>
+          ) : (
+            <p style={S.dimText}>論文メタデータはキャッシュにありません</p>
+          )}
+
+          <div style={S.detailSection}>
+            <h3 style={S.detailLabel}>キャッシュ状況</h3>
+            <ul style={{ fontSize: "0.85rem", color: "#cbd5e1", lineHeight: 1.6 }}>
+              <li>要約: {detail.summary
+                ? (detail.summary_empty ? "あり (空)" : "あり")
+                : "なし"}</li>
+              <li>画像 URL: {detail.figure_urls.length} 件</li>
+              <li>ローカル PDF: {detail.pdf_cache.cached
+                ? `あり (${fmtBytes(detail.pdf_cache.bytes)})` : "なし"}</li>
+            </ul>
+          </div>
+
+          {detail.figure_urls.length > 0 && (
+            <div style={S.detailSection}>
+              <h3 style={S.detailLabel}>画像</h3>
+              <div style={S.figGrid}>
+                {detail.figure_urls.map((url, i) => (
+                  <img key={i} src={url} alt={`fig${i}`} style={S.figImg} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {detail.summary && (
+            <div style={S.detailSection}>
+              <h3 style={S.detailLabel}>要約</h3>
+              {Object.entries(summary).filter(([, v]) => v).length > 0 ? (
+                Object.entries(summary).filter(([, v]) => v).map(([k, v]) => (
+                  <div key={k} style={S.summaryBlock}>
+                    <div style={S.summaryKey}>{k}</div>
+                    <div style={S.summaryVal}>{v}</div>
+                  </div>
+                ))
+              ) : (
+                <p style={S.dimText}>要約は空です</p>
+              )}
+            </div>
+          )}
+
+          <div style={{ ...S.detailSection, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              style={S.smallBtnGhost}
+              disabled={busy}
+              onClick={() => dropPaper(detail.paper_id, {
+                drop_summary: true, drop_figures: false, drop_pdf: false,
+              })}
+            >要約だけ削除</button>
+            <button
+              type="button"
+              style={S.smallBtnGhost}
+              disabled={busy}
+              onClick={() => dropPaper(detail.paper_id, {
+                drop_summary: false, drop_figures: true, drop_pdf: false,
+              })}
+            >画像だけ削除</button>
+            <button
+              type="button"
+              style={{ ...S.smallBtnGhost, color: "#f87171", borderColor: "#f87171" }}
+              disabled={busy}
+              onClick={() => dropPaper(detail.paper_id, {
+                drop_summary: true, drop_figures: true, drop_pdf: true,
+              })}
+            >すべて削除</button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* Stats */}
+      {stats && (
+        <div style={S.statsRow}>
+          <div style={S.statBox}>
+            <div style={S.statNum}>{stats.summaries.count}</div>
+            <div style={S.statLabel}>要約 (空: {stats.summaries.empty})</div>
+          </div>
+          <div style={S.statBox}>
+            <div style={S.statNum}>{stats.figures.count}</div>
+            <div style={S.statLabel}>画像 ({fmtBytes(stats.figures.total_bytes)})</div>
+          </div>
+          <div style={S.statBox}>
+            <div style={S.statNum}>{stats.papers_metadata.count}</div>
+            <div style={S.statLabel}>論文メタ</div>
+          </div>
+          <div style={S.statBox}>
+            <div style={S.statNum}>{stats.decks.count}</div>
+            <div style={S.statLabel}>デッキ ({stats.decks.total_paper_ids} ids)</div>
+          </div>
+          <div style={S.statBox}>
+            <div style={S.statNum}>{stats.pdf_files.count}</div>
+            <div style={S.statLabel}>PDF ({fmtBytes(stats.pdf_files.total_bytes)})</div>
+          </div>
+          <div style={S.statBox}>
+            <div style={{ ...S.statNum, fontSize: "0.95rem" }}>{stats.backend}</div>
+            <div style={S.statLabel}>バックエンド</div>
+          </div>
+        </div>
+      )}
+
+      {/* Filters */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+        {[
+          { k: "with_summary",  label: "要約あり" },
+          { k: "empty_summary", label: "空の要約" },
+          { k: "no_summary",    label: "要約なし" },
+          { k: "with_figures",  label: "画像あり" },
+          { k: "no_figures",    label: "画像なし" },
+          { k: "metadata_only", label: "メタのみ" },
+        ].map((f) => (
+          <button
+            key={f.k}
+            type="button"
+            onClick={() => { setOffset(0); setFilter(f.k); }}
+            style={{
+              ...S.filterBtn,
+              ...(filter === f.k ? S.filterBtnActive : {}),
+            }}
+          >{f.label}</button>
+        ))}
+        <input
+          type="text"
+          placeholder="タイトル / paper_id 検索"
+          value={search}
+          onChange={(e) => { setSearch(e.target.value); setOffset(0); }}
+          style={{
+            flex: 1,
+            minWidth: 180,
+            padding: "6px 10px",
+            borderRadius: 8,
+            border: "1px solid #334155",
+            background: "#0f172a",
+            color: "#e2e8f0",
+            fontSize: "0.85rem",
+          }}
+        />
+        <button
+          type="button"
+          style={{ ...S.smallBtnGhost, color: "#fbbf24", borderColor: "#fbbf24" }}
+          onClick={cleanupEmpty}
+          disabled={busy}
+        >空要約を一掃</button>
+      </div>
+
+      {/* List */}
+      {loading ? (
+        <div style={S.emptyState}>読み込み中...</div>
+      ) : papers.length === 0 ? (
+        <div style={S.emptyState}>該当なし</div>
+      ) : (
+        <>
+          <div style={{ ...S.dimText, marginBottom: 8 }}>
+            {total} 件中 {offset + 1}–{Math.min(offset + PAGE, total)} を表示
+          </div>
+          <div style={S.cardList}>
+            {papers.map((p) => (
+              <div
+                key={p.paper_id}
+                style={S.cardItem}
+                onClick={() => openDetail(p.paper_id)}
+              >
+                <div style={S.cardInfo}>
+                  <div style={S.cardItemTitle}>
+                    {p.title || p.paper_id}
+                  </div>
+                  <div style={S.cardItemMeta}>
+                    {p.venue || "?"} {p.year || ""} — {p.paper_id}
+                  </div>
+                  <div style={S.cardBadges}>
+                    {p.has_summary && !p.summary_empty && <span style={S.badgeOk}>要約</span>}
+                    {p.summary_empty && <span style={S.badgeWarn}>空の要約</span>}
+                    {p.has_figures && <span style={S.badgeOk}>画像</span>}
+                    {!p.in_deck && <span style={S.badgeWarn}>orphan</span>}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Pagination */}
+          <div style={{ display: "flex", gap: 8, marginTop: 12, justifyContent: "center" }}>
+            <button
+              type="button"
+              style={S.smallBtnGhost}
+              disabled={offset === 0}
+              onClick={() => setOffset(Math.max(0, offset - PAGE))}
+            >&larr; 前</button>
+            <button
+              type="button"
+              style={S.smallBtnGhost}
+              disabled={offset + PAGE >= total}
+              onClick={() => setOffset(offset + PAGE)}
+            >次 &rarr;</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+
+// ============================================================
+// Card detail editor (separate component so we can use hooks cleanly)
+// ============================================================
+function CardDetailEditor({
+  card,
+  uploading,
+  onBack,
+  onUpload,
+  onDeleteFigure,
+  onReorderFigure,
+  onReplaceFigure,
+  onSaveSummary,
+  onRebuild,
+  styles: S,
+}) {
+  const [editingSummary, setEditingSummary] = useState(false);
+  const initialSummary = card.summary || {};
+  const [summaryDraft, setSummaryDraft] = useState(initialSummary);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setSummaryDraft(card.summary || {});
+    setEditingSummary(false);
+  }, [card.paper_id, card.summary]);
+
+  const summaryKeys = Object.keys(summaryDraft).length
+    ? Object.keys(summaryDraft)
+    : ["claim", "what", "novel", "method", "eval", "discussion"];
+  const figures = card.figure_urls || [];
+
+  const save = async () => {
+    setSaving(true);
+    await onSaveSummary(summaryDraft);
+    setSaving(false);
+    setEditingSummary(false);
+  };
+
+  return (
+    <div style={S.container}>
+      <div style={S.topBar}>
+        <button onClick={onBack} style={S.backBtn}>&larr; 戻る</button>
+        <h1 style={S.logo}>カード詳細</h1>
+      </div>
+      <section style={S.card}>
+        <div style={S.detailHeader}>
+          <span style={S.badge}>{card.venue} {card.year}</span>
+          {!card.has_figures && <span style={S.badgeDanger}>画像なし</span>}
+          {!card.has_summary && <span style={S.badgeWarn}>要約なし</span>}
+        </div>
+        <h2 style={{ ...S.cardTitle, fontSize: "1.1rem" }}>{card.title}</h2>
+        <div style={S.detailAuthors}>
+          {(card.authors || []).slice(0, 5).join(", ")}
+          {(card.authors || []).length > 5 && " et al."}
+        </div>
+
+        {/* Figures --------------------------------------------------- */}
+        <div style={S.detailSection}>
+          <h3 style={S.detailLabel}>画像 ({figures.length})</h3>
+          {figures.length > 0 ? (
+            <div style={S.figGrid}>
+              {figures.map((url, i) => (
+                <div key={`${url}-${i}`} style={{ position: "relative" }}>
+                  <img src={url} alt={`fig${i}`} style={S.figImg} />
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 4,
+                      justifyContent: "center",
+                      marginTop: 4,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      style={S.smallBtnGhost}
+                      disabled={i === 0}
+                      onClick={() => onReorderFigure(i, i - 1)}
+                      title="左へ"
+                    >&larr;</button>
+                    <button
+                      type="button"
+                      style={S.smallBtnGhost}
+                      disabled={i === figures.length - 1}
+                      onClick={() => onReorderFigure(i, i + 1)}
+                      title="右へ"
+                    >&rarr;</button>
+                    <label style={{ ...S.smallBtn, cursor: "pointer" }}>
+                      差替
+                      <input
+                        type="file"
+                        accept="image/*"
+                        style={{ display: "none" }}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) onReplaceFigure(i, f);
+                        }}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      style={{ ...S.smallBtnGhost, color: "#f87171", borderColor: "#f87171" }}
+                      onClick={() => onDeleteFigure(i)}
+                    >削除</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p style={S.dimText}>画像がありません</p>
+          )}
+          <label style={{ ...S.uploadLabel, marginTop: 10, display: "inline-block" }}>
+            <input
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) onUpload(f);
+              }}
+            />
+            <span style={S.uploadBtn}>
+              {uploading ? "処理中..." : "画像を追加"}
+            </span>
+          </label>
+        </div>
+
+        {/* Summary --------------------------------------------------- */}
+        <div style={S.detailSection}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              marginBottom: 8,
+            }}
+          >
+            <h3 style={{ ...S.detailLabel, margin: 0 }}>要約</h3>
+            {!editingSummary ? (
+              <button
+                type="button"
+                style={S.smallBtn}
+                onClick={() => setEditingSummary(true)}
+              >編集</button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  style={S.smallBtnPrimary}
+                  onClick={save}
+                  disabled={saving}
+                >{saving ? "保存中..." : "保存"}</button>
+                <button
+                  type="button"
+                  style={S.smallBtnGhost}
+                  onClick={() => {
+                    setSummaryDraft(card.summary || {});
+                    setEditingSummary(false);
+                  }}
+                >取消</button>
+              </>
+            )}
+          </div>
+
+          {editingSummary ? (
+            summaryKeys.map((key) => (
+              <div key={key} style={S.summaryBlock}>
+                <div style={S.summaryKey}>{key}</div>
+                <textarea
+                  value={summaryDraft[key] || ""}
+                  onChange={(e) =>
+                    setSummaryDraft((d) => ({ ...d, [key]: e.target.value }))
+                  }
+                  rows={3}
+                  style={{
+                    width: "100%",
+                    background: "#0f172a",
+                    color: "#e2e8f0",
+                    border: "1px solid #334155",
+                    borderRadius: 6,
+                    padding: 8,
+                    fontSize: "0.82rem",
+                    fontFamily: "inherit",
+                    resize: "vertical",
+                  }}
+                />
+              </div>
+            ))
+          ) : Object.entries(card.summary || {}).filter(([, v]) => v).length > 0 ? (
+            Object.entries(card.summary || {})
+              .filter(([, v]) => v)
+              .map(([key, val]) => (
+                <div key={key} style={S.summaryBlock}>
+                  <div style={S.summaryKey}>{key}</div>
+                  <div style={S.summaryVal}>{val}</div>
+                </div>
+              ))
+          ) : (
+            <p style={S.dimText}>要約がありません</p>
+          )}
+        </div>
+
+        {/* Rebuild --------------------------------------------------- */}
+        <div style={{ ...S.detailSection, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            style={S.smallBtn}
+            onClick={() => onRebuild({ summary: true, figures: false })}
+          >要約だけ再生成</button>
+          <button
+            type="button"
+            style={S.smallBtn}
+            onClick={() => onRebuild({ summary: false, figures: true })}
+          >画像だけ再抽出</button>
+          <button
+            type="button"
+            style={S.smallBtnPrimary}
+            onClick={() => onRebuild({ summary: true, figures: true })}
+          >カード全体を再生成</button>
+        </div>
+
+        {card.abstract && (
+          <div style={S.detailSection}>
+            <h3 style={S.detailLabel}>Abstract</h3>
+            <p style={S.abstractText}>{card.abstract}</p>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
 
 // ============================================================
 // Styles
