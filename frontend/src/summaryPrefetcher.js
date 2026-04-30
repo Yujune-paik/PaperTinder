@@ -1,34 +1,72 @@
 /**
  * Centralized summary prefetch manager.
  *
- * Key design decisions:
- *  - LIFO queue (pop) so the papers the user sees first get processed first.
- *  - Deferred queue flush: enqueue() batches items and flushes via microtask,
- *    ensuring a whole batch lands before the first 3 slots are claimed.
- *  - Per-fetch timeout (90s) prevents hung connections from permanently
- *    blocking concurrency slots.
- *  - Concurrency = 3 to avoid overwhelming the serverless backend.
+ * Lookahead model
+ * ---------------
+ * The parent component owns the deck and knows the order in which the
+ * user will encounter cards. It tells the prefetcher "here are the next
+ * N papers, in order" via ``setUpcoming(papersInEncounterOrder)``. The
+ * prefetcher ensures the first ``LOOKAHEAD`` of those are actively being
+ * prefetched (subject to ``CONCURRENCY``). Already-cached entries are
+ * skipped; in-flight fetches that fall outside the window are left to
+ * complete (the user is briefly viewing the card they just swiped past
+ * and may scroll back).
+ *
+ * Why this model
+ * --------------
+ * A previous attempt used a LIFO queue + per-paper enqueue, which meant
+ * the very first card the user landed on was the LAST to be processed.
+ * The encounter-order model guarantees the next paper is generated
+ * before the one after it — exactly aligned with the user's swipe motion.
+ *
+ * Tuning
+ * ------
+ * - LOOKAHEAD = 6: ≈ 2 generation cycles (CONCURRENCY × 2). At ~20 s
+ *   per card and ~20 s cold gen, a 6-deep buffer leaves ≥2× safety.
+ * - CONCURRENCY = 3: parallel SSE streams. Higher saturates the
+ *   serverless backend; lower starves the lookahead.
  */
 
 const CONCURRENCY = 3;
+const LOOKAHEAD = 6;
 const CHUNK_THROTTLE_MS = 250;
 const FETCH_TIMEOUT_MS = 90_000;
 
 export class SummaryPrefetcher {
   constructor() {
-    this._active = 0;
-    this._queue = [];
-    this._cache = new Map();
-    this._listeners = new Map();
+    this._active = 0;            // count of in-flight fetches
+    this._cache = new Map();     // paperId → entry
+    this._listeners = new Map(); // paperId → Set<callback>
     this._abortControllers = new Map();
     this._chunkTimers = new Map();
-    this._flushScheduled = false;
+
+    this._upcoming = [];         // papers in user encounter order
+    this._lookahead = LOOKAHEAD;
+    this._scheduled = false;
   }
 
-  getEntry(paperId) {
-    return this._cache.get(paperId) || null;
+  // ---------------------------------------------------------------------
+  // Public API
+  // ---------------------------------------------------------------------
+
+  /**
+   * Replace the prefetch queue with the next batch of papers in user
+   * encounter order. The prefetcher will work on the first ``LOOKAHEAD``
+   * entries.
+   */
+  setUpcoming(papers) {
+    this._upcoming = Array.isArray(papers) ? papers.slice() : [];
+    this._scheduleWindow();
   }
 
+  setLookahead(n) {
+    if (Number.isFinite(n) && n >= 1) {
+      this._lookahead = n;
+      this._scheduleWindow();
+    }
+  }
+
+  // Subscribe / unsubscribe from progressive updates for a specific paper.
   subscribe(paperId, callback) {
     if (!this._listeners.has(paperId)) {
       this._listeners.set(paperId, new Set());
@@ -45,27 +83,84 @@ export class SummaryPrefetcher {
     }
   }
 
-  enqueue(paper) {
-    const pid = paper.paper_id;
-    if (this._cache.has(pid)) return;
-    this._cache.set(pid, {
-      loading: true,
-      summary: null,
-      figures: [],
-      streamText: "",
-      error: false,
-    });
-    this._queue.push(paper);
-    this._scheduleFlush();
+  getEntry(paperId) {
+    return this._cache.get(paperId) || null;
   }
 
-  _scheduleFlush() {
-    if (this._flushScheduled) return;
-    this._flushScheduled = true;
+  retry(paper) {
+    const pid = paper.paper_id;
+    this._abortControllers.get(pid)?.abort();
+    this._abortControllers.delete(pid);
+    this._cache.delete(pid);
+    const timer = this._chunkTimers.get(pid);
+    if (timer) {
+      clearTimeout(timer);
+      this._chunkTimers.delete(pid);
+    }
+    this._scheduleWindow();
+  }
+
+  reset() {
+    for (const ac of this._abortControllers.values()) ac.abort();
+    this._abortControllers.clear();
+    for (const timer of this._chunkTimers.values()) clearTimeout(timer);
+    this._chunkTimers.clear();
+    this._upcoming = [];
+    this._cache.clear();
+    this._active = 0;
+  }
+
+  get readyCount() {
+    let count = 0;
+    for (const entry of this._cache.values()) {
+      if (entry.summary && !entry.loading) count++;
+    }
+    return count;
+  }
+
+  get totalQueued() {
+    return this._cache.size;
+  }
+
+  // ---------------------------------------------------------------------
+  // Internals
+  // ---------------------------------------------------------------------
+
+  _scheduleWindow() {
+    // Coalesce multiple synchronous calls into a single processing pass.
+    if (this._scheduled) return;
+    this._scheduled = true;
     Promise.resolve().then(() => {
-      this._flushScheduled = false;
-      this._processQueue();
+      this._scheduled = false;
+      this._fillWindow();
     });
+  }
+
+  _fillWindow() {
+    const end = Math.min(this._upcoming.length, this._lookahead);
+    for (let i = 0; i < end && this._active < CONCURRENCY; i++) {
+      const paper = this._upcoming[i];
+      if (!paper) continue;
+      const pid = paper.paper_id;
+      const existing = this._cache.get(pid);
+      // Already done or already in flight — skip.
+      if (existing && (!existing.loading || this._abortControllers.has(pid))) {
+        continue;
+      }
+      // Start a fresh fetch.
+      this._cache.set(pid, {
+        loading: true,
+        summary: null,
+        figures: [],
+        streamText: "",
+        error: false,
+      });
+      this._active++;
+      this._fetchSummary(paper).finally(() => {
+        this._active--;
+        this._scheduleWindow();
+      });
+    }
   }
 
   _notify(paperId) {
@@ -85,19 +180,8 @@ export class SummaryPrefetcher {
       setTimeout(() => {
         this._chunkTimers.delete(paperId);
         this._notify(paperId);
-      }, CHUNK_THROTTLE_MS)
+      }, CHUNK_THROTTLE_MS),
     );
-  }
-
-  _processQueue() {
-    while (this._active < CONCURRENCY && this._queue.length > 0) {
-      const paper = this._queue.pop();
-      this._active++;
-      this._fetchSummary(paper).finally(() => {
-        this._active--;
-        this._processQueue();
-      });
-    }
   }
 
   async _fetchSummary(paper) {
@@ -108,11 +192,13 @@ export class SummaryPrefetcher {
     const timeout = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS);
 
     try {
+      // Prefer the cached path (GET) — server hits its summary cache
+      // without re-uploading paper metadata.
       let res;
       try {
         res = await fetch(
           `/api/stream/${encodeURIComponent(pid)}`,
-          { signal: ac.signal }
+          { signal: ac.signal, credentials: "include" },
         );
         if (!res.ok) throw new Error("cache miss");
       } catch (e) {
@@ -120,6 +206,7 @@ export class SummaryPrefetcher {
         res = await fetch("/api/stream-inline", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          credentials: "include",
           body: JSON.stringify(paper),
           signal: ac.signal,
         });
@@ -161,9 +248,10 @@ export class SummaryPrefetcher {
             } else if (data.type === "done") {
               entry.loading = false;
               this._notify(pid);
-            } else if (data.type === "error") {
+            } else if (data.type === "error" || data.type === "rate_limited") {
               entry.loading = false;
               entry.error = true;
+              entry.errorMessage = data.message || "";
               this._notify(pid);
             }
           } catch {
@@ -198,43 +286,5 @@ export class SummaryPrefetcher {
       clearTimeout(timeout);
       this._abortControllers.delete(pid);
     }
-  }
-
-  retry(paper) {
-    const pid = paper.paper_id;
-    this._abortControllers.get(pid)?.abort();
-    this._abortControllers.delete(pid);
-    this._cache.delete(pid);
-    const timer = this._chunkTimers.get(pid);
-    if (timer) {
-      clearTimeout(timer);
-      this._chunkTimers.delete(pid);
-    }
-    this.enqueue(paper);
-  }
-
-  reset() {
-    for (const ac of this._abortControllers.values()) {
-      ac.abort();
-    }
-    this._abortControllers.clear();
-    for (const timer of this._chunkTimers.values()) {
-      clearTimeout(timer);
-    }
-    this._chunkTimers.clear();
-    this._queue = [];
-    this._cache.clear();
-  }
-
-  get readyCount() {
-    let count = 0;
-    for (const entry of this._cache.values()) {
-      if (entry.summary && !entry.loading) count++;
-    }
-    return count;
-  }
-
-  get totalQueued() {
-    return this._cache.size;
   }
 }

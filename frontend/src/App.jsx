@@ -8,10 +8,16 @@ import StreakBadge from "./components/StreakBadge";
 import ProgressBar from "./components/ProgressBar";
 import CompletionScreen from "./components/CompletionScreen";
 import LoginButton from "./components/LoginButton";
+import { SummaryPrefetcher } from "./summaryPrefetcher";
 
 const DECK_PAGE_SIZE = 50;
 
 export default function App() {
+  const prefetcherRef = useRef(null);
+  if (!prefetcherRef.current) {
+    prefetcherRef.current = new SummaryPrefetcher();
+  }
+
   const [papers, setPapers] = useState([]);
   const [readingList, setReadingList] = useState([]);
   const [showReadingList, setShowReadingList] = useState(false);
@@ -97,6 +103,7 @@ export default function App() {
     setShowCompletion(false);
     setPapers([]);
     setVenueProgress(null);
+    prefetcherRef.current.reset();
     deckRef.current = { venue: null, year: null, offset: 0, total: 0, hasMore: false, loading: false, seenSet: new Set() };
     setSearchProgress({ currentVenue: null, venueIndex: 0, venueTotal: venues.length, totalFound: 0, venueDone: {} });
 
@@ -391,6 +398,7 @@ export default function App() {
               onSwipe={handleSwipe}
               onQueueEmpty={handleQueueEmpty}
               venueProgress={venueProgress}
+              prefetcher={prefetcherRef.current}
             />
           ) : (
             <div className="empty-state">

@@ -5,7 +5,7 @@ import PaperCard from "./PaperCard";
 
 const PREFETCH_THRESHOLD = 3;
 
-export default function SwipeStack({ papers, onSwipe, onQueueEmpty, venueProgress }) {
+export default function SwipeStack({ papers, onSwipe, onQueueEmpty, venueProgress, prefetcher }) {
   const [currentIndex, setCurrentIndex] = useState(papers.length - 1);
   const [swipeDirection, setSwipeDirection] = useState(null);
   const currentIndexRef = useRef(currentIndex);
@@ -16,6 +16,23 @@ export default function SwipeStack({ papers, onSwipe, onQueueEmpty, venueProgres
     currentIndexRef.current = papers.length - 1;
     cardRefs.current = papers.map(() => null);
   }, [papers]);
+
+  // Hand the prefetcher the next papers in user encounter order. The deck
+  // is stored with the topmost card at the END of the array (currentIndex
+  // starts at length-1 and decrements on swipe), so encounter order is
+  // papers[currentIndex], papers[currentIndex-1], …
+  useEffect(() => {
+    if (!prefetcher) return;
+    if (currentIndex < 0) {
+      prefetcher.setUpcoming([]);
+      return;
+    }
+    const upcoming = [];
+    for (let i = currentIndex; i >= 0; i--) {
+      upcoming.push(papers[i]);
+    }
+    prefetcher.setUpcoming(upcoming);
+  }, [papers, currentIndex, prefetcher]);
 
   const canSwipe = currentIndex >= 0;
 
@@ -113,7 +130,7 @@ export default function SwipeStack({ papers, onSwipe, onQueueEmpty, venueProgres
                 animate={offset === 0 ? { scale: 1, opacity: 1 } : false}
                 transition={{ type: "spring", stiffness: 300, damping: 25 }}
               >
-                <PaperCard paper={paper} isTop={offset === 0} />
+                <PaperCard paper={paper} isTop={offset === 0} prefetcher={prefetcher} />
               </motion.div>
             </TinderCard>
           );

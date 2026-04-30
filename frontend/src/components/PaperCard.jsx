@@ -42,18 +42,46 @@ function parseLiveStream(text) {
   return result;
 }
 
-export default function PaperCard({ paper, isTop }) {
+export default function PaperCard({ paper, isTop, prefetcher }) {
   const [summary, setSummary] = useState(paper._preloaded_summary || null);
   const [streamText, setStreamText] = useState("");
   const [figures, setFigures] = useState(paper._preloaded_figures || []);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(!paper._preloaded_summary);
   const [streamError, setStreamError] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [expandedSections, setExpandedSections] = useState(
     new Set(Object.keys(SECTION_LABELS))
   );
 
+  // Subscribe to the centralized prefetcher (works whether the card is
+  // currently top or just behind it). The prefetcher owns the SSE stream
+  // and broadcasts updates to every subscribed card.
   useEffect(() => {
+    if (!prefetcher) return;
+    if (paper._preloaded_summary) return;
+
+    const cb = (entry) => {
+      if (entry.summary) setSummary(entry.summary);
+      if (entry.streamText) setStreamText(entry.streamText);
+      if (entry.figures?.length > 0) setFigures(entry.figures);
+      setLoading(entry.loading);
+      if (entry.error) {
+        setStreamError(true);
+        setLoading(false);
+      }
+    };
+
+    const initial = prefetcher.subscribe(paper.paper_id, cb);
+    if (initial) cb(initial);
+
+    return () => prefetcher.unsubscribe(paper.paper_id, cb);
+  }, [paper.paper_id, prefetcher, retryCount]);
+
+  // Fallback: when there's no prefetcher (legacy callers), open the SSE
+  // ourselves once the card becomes top. Cached summaries are returned
+  // server-side so the cost is just the HTTP round-trip.
+  useEffect(() => {
+    if (prefetcher) return;
     if (!isTop) return;
     if (summary) return;
 
@@ -138,7 +166,7 @@ export default function PaperCard({ paper, isTop }) {
     startStream();
 
     return () => {};
-  }, [isTop, paper.paper_id, retryCount]);
+  }, [isTop, paper.paper_id, retryCount, prefetcher, summary]);
 
   const liveSummary = useMemo(() => {
     if (summary || !streamText) return null;

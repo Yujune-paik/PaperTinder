@@ -166,7 +166,6 @@ export default function MobileApp() {
               const newPapers = (event.papers || []).filter((p) => !allSeen.has(p.paper_id));
               if (newPapers.length > 0) {
                 setPapers((prev) => [...prev, ...newPapers]);
-                newPapers.forEach((p) => prefetcherRef.current.enqueue(p));
               }
               setSearchProgress((prev) => ({
                 ...prev,

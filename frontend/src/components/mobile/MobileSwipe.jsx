@@ -71,6 +71,23 @@ export default function MobileSwipe({
     return () => clearInterval(timer);
   }, [loading, prefetcher]);
 
+  // Tell the prefetcher which papers the user is about to encounter, in
+  // order. MobileSwipe stores papers with the topmost card at the END of
+  // the array (currentIndex starts at length-1 and decrements on swipe),
+  // so the encounter order is papers[currentIndex], papers[currentIndex-1], …
+  useEffect(() => {
+    if (!prefetcher) return;
+    if (currentIndex < 0) {
+      prefetcher.setUpcoming([]);
+      return;
+    }
+    const upcoming = [];
+    for (let i = currentIndex; i >= 0; i--) {
+      upcoming.push(papers[i]);
+    }
+    prefetcher.setUpcoming(upcoming);
+  }, [papers, currentIndex, prefetcher]);
+
   const visibleCards = useMemo(() => {
     const start = Math.max(0, currentIndex - (VISIBLE_WINDOW - 1));
     const end = currentIndex + 1;

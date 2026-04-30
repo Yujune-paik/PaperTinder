@@ -77,7 +77,7 @@ export default function MobilePaperCard({
 
     const initial = prefetcher.subscribe(paper.paper_id, cb);
     if (initial) cb(initial);
-    prefetcher.enqueue(paper);
+    // The deck is owned by MobileApp; we just listen for updates here.
 
     return () => prefetcher.unsubscribe(paper.paper_id, cb);
   }, [paper.paper_id, prefetcher]);
