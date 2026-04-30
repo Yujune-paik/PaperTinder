@@ -9,8 +9,12 @@ upstash-redis>=1.0.0
 pdfminer.six>=20231228
 pypdfium2>=4.0.0
 Pillow>=10.0.0
-google-auth>=2.40.0
-requests>=2.32.0
+# Google ID token verification is implemented manually with cryptography
+# (see src/services/auth.py) so we don't depend on google-auth's transport
+# packages — those fail to install reliably on Vercel's vendored runtime
+# (the `requests` package goes missing). cryptography is already pulled
+# in transitively via pdfminer.six, so no size impact.
+cryptography>=42.0.0
 
 # NOTE: markitdown[pdf] は optional (magika/onnxruntime を含み 200MB 超)。
 # Vercel Lambda 上限 (245MB) を超えるため本番 requirements からは外し、
