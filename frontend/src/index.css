@@ -71,10 +71,13 @@
   --glass-bg: rgba(255, 255, 255, 0.85);
   --glass-border: rgba(0, 0, 0, 0.08);
 
-  /* Typography */
-  --font: "Inter", "Noto Sans JP", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  --font-display: "Inter", "Noto Sans JP", -apple-system, system-ui, sans-serif;
-  --font-serif: "Noto Serif JP", "Iowan Old Style", "Charter", Georgia, serif;
+  /* Typography
+     Latin fonts come FIRST so English glyphs render with proper Latin
+     proportions; the Japanese fallback (Noto Serif/Sans JP) kicks in
+     only for CJK characters. */
+  --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", system-ui, sans-serif;
+  --font-display: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", system-ui, sans-serif;
+  --font-serif: Georgia, "Iowan Old Style", "Charter", "Palatino Linotype", "Noto Serif JP", serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
 }
 
@@ -122,19 +125,21 @@ body {
 }
 
 .logo {
-  font-family: var(--font-serif);
-  font-size: 1.625rem;
+  font-family: var(--font);
+  font-size: 1.5rem;
   font-weight: 700;
   color: var(--text);
-  letter-spacing: -0.5px;
+  letter-spacing: -0.704px;
+  line-height: 1.1;
   background: none;
   -webkit-text-fill-color: currentColor;
 }
 
 .tagline {
-  font-size: 0.85rem;
+  font-size: 0.8125rem;
   color: var(--text-secondary);
   font-weight: 500;
+  letter-spacing: -0.13px;
 }
 
 .header-right {
