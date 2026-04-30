@@ -7,51 +7,91 @@
   padding: 0;
 }
 
+/* === Notion-inspired design tokens (user-facing) ===
+   Warm minimalism: pure-white canvas, near-black text with micro-warmth,
+   whisper borders, multi-layer soft shadows, Notion Blue as the only
+   saturated UI color. */
 :root {
-  --bg: #0a0a0f;
-  --bg-card: #12121a;
-  --bg-surface: #1a1a2e;
-  --bg-hover: #252540;
-  --border: #2a2a45;
-  --text: #e8e8f0;
-  --text-secondary: #9898b0;
-  --text-dim: #606080;
-  --accent: #6c5ce7;
-  --accent-glow: #7c6cf7;
-  --accent-soft: rgba(108, 92, 231, 0.12);
-  --green: #10b981;
-  --green-glow: rgba(16, 185, 129, 0.3);
-  --red: #f43f5e;
-  --red-glow: rgba(244, 63, 94, 0.3);
-  --yellow: #f59e0b;
-  --blue: #3b82f6;
-  --orange: #ff9f43;
-  --radius: 12px;
-  --radius-sm: 8px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
-  --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 8px 48px rgba(0, 0, 0, 0.6);
-  --shadow-neon-purple: 0 0 20px rgba(108, 92, 231, 0.3);
-  --shadow-neon-green: 0 0 24px rgba(16, 185, 129, 0.35);
-  --shadow-neon-red: 0 0 24px rgba(244, 63, 94, 0.35);
-  --glass-bg: rgba(18, 18, 26, 0.72);
-  --glass-border: rgba(255, 255, 255, 0.06);
-  --font: "Inter", "Noto Sans JP", system-ui, sans-serif;
+  /* Surfaces */
+  --bg: #ffffff;            /* page background */
+  --bg-card: #ffffff;       /* card surfaces */
+  --bg-surface: #f6f5f4;    /* warm-white alt sections */
+  --bg-hover: #f3f4f5;      /* subtle hover tint */
+
+  /* Borders — whisper-thin, semi-transparent */
+  --border: rgba(0, 0, 0, 0.1);
+  --border-strong: rgba(0, 0, 0, 0.15);
+  --border-subtle: rgba(0, 0, 0, 0.06);
+
+  /* Text — warm near-black, never pure */
+  --text: rgba(0, 0, 0, 0.95);     /* primary */
+  --text-secondary: #615d59;       /* warm gray 500 */
+  --text-dim: #a39e98;              /* warm gray 300 */
+
+  /* Brand accent — Notion Blue */
+  --accent: #0075de;
+  --accent-glow: #097fe8;
+  --accent-soft: #f2f9ff;            /* badge bg */
+  --accent-active: #005bab;          /* pressed state */
+
+  /* Status — semantic, used sparingly */
+  --green: #1aae39;
+  --green-glow: rgba(26, 174, 57, 0.18);
+  --red: #dd5b00;        /* warning orange */
+  --red-glow: rgba(221, 91, 0, 0.18);
+  --yellow: #dd5b00;
+  --blue: #0075de;
+  --orange: #dd5b00;
+
+  /* Radius — Notion's organic scale */
+  --radius: 12px;       /* standard cards */
+  --radius-sm: 8px;     /* small containers */
+  --radius-md: 4px;     /* buttons / inputs */
+  --radius-lg: 16px;    /* hero cards */
+  --radius-xl: 20px;    /* large panels */
+  --radius-pill: 9999px;
+
+  /* Shadows — multi-layer, sub-0.05 opacity */
+  --shadow:
+    rgba(0, 0, 0, 0.04) 0px 4px 18px,
+    rgba(0, 0, 0, 0.027) 0px 2.025px 7.84688px,
+    rgba(0, 0, 0, 0.02) 0px 0.8px 2.925px,
+    rgba(0, 0, 0, 0.01) 0px 0.175px 1.04062px;
+  --shadow-lg:
+    rgba(0, 0, 0, 0.01) 0px 1px 3px,
+    rgba(0, 0, 0, 0.02) 0px 3px 7px,
+    rgba(0, 0, 0, 0.02) 0px 7px 15px,
+    rgba(0, 0, 0, 0.04) 0px 14px 28px,
+    rgba(0, 0, 0, 0.05) 0px 23px 52px;
+  --shadow-neon-purple: var(--shadow);
+  --shadow-neon-green: var(--shadow);
+  --shadow-neon-red: var(--shadow);
+
+  /* Glass effects (rarely used in light theme) */
+  --glass-bg: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(0, 0, 0, 0.08);
+
+  /* Typography */
+  --font: "Inter", "Noto Sans JP", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-display: "Inter", "Noto Sans JP", -apple-system, system-ui, sans-serif;
+  --font-serif: "Noto Serif JP", "Iowan Old Style", "Charter", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
 }
 
 html {
-  font-size: 15px;
+  font-size: 16px;
 }
 
 body {
   font-family: var(--font);
+  font-feature-settings: "lnum", "locl";
   background: var(--bg);
   color: var(--text);
-  line-height: 1.6;
+  line-height: 1.5;
   min-height: 100vh;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* === App Layout === */
@@ -65,13 +105,14 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 24px;
-  background: var(--bg-card);
+  padding: 14px 28px;
+  background: rgba(255, 255, 255, 0.92);
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
   z-index: 100;
   backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .header-left {
@@ -81,18 +122,19 @@ body {
 }
 
 .logo {
-  font-size: 1.5rem;
-  font-weight: 800;
-  background: linear-gradient(135deg, var(--accent), var(--green));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  font-family: var(--font-serif);
+  font-size: 1.625rem;
+  font-weight: 700;
+  color: var(--text);
   letter-spacing: -0.5px;
+  background: none;
+  -webkit-text-fill-color: currentColor;
 }
 
 .tagline {
   font-size: 0.85rem;
-  color: var(--text-dim);
+  color: var(--text-secondary);
+  font-weight: 500;
 }
 
 .header-right {
@@ -135,23 +177,27 @@ body {
   align-items: center;
   gap: 6px;
   padding: 8px 16px;
-  border: none;
-  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
   font-family: var(--font);
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, transform 0.1s ease, color 0.15s ease, box-shadow 0.15s ease;
   white-space: nowrap;
+  letter-spacing: -0.01em;
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .btn-primary {
   background: var(--accent);
-  color: #fff;
+  color: #ffffff;
 }
 .btn-primary:hover:not(:disabled) {
-  background: var(--accent-glow);
-  box-shadow: 0 0 20px rgba(108, 92, 231, 0.3);
+  background: var(--accent-active);
+  box-shadow: var(--shadow);
 }
 .btn-primary:disabled {
   opacity: 0.5;
@@ -159,18 +205,17 @@ body {
 }
 
 .btn-ghost {
-  background: transparent;
-  color: var(--text-secondary);
-  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text);
+  border: 1px solid transparent;
 }
 .btn-ghost:hover {
-  background: var(--bg-hover);
-  color: var(--text);
+  background: rgba(0, 0, 0, 0.08);
 }
 
 .btn-success {
   background: var(--green);
-  color: #fff;
+  color: #ffffff;
 }
 
 .btn-danger {
@@ -179,7 +224,7 @@ body {
   border: 1px solid transparent;
 }
 .btn-danger:hover {
-  background: rgba(239, 68, 68, 0.1);
+  background: rgba(221, 91, 0, 0.1);
 }
 
 .btn-sm {
@@ -418,7 +463,7 @@ body {
 .venue-progress-fill {
   height: 100%;
   border-radius: 3px;
-  background: linear-gradient(90deg, var(--accent), #10b981);
+  background: var(--accent);
   transition: width 0.4s ease;
 }
 .venue-progress-label {
@@ -446,19 +491,20 @@ body {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 16px 18px;
+  padding: 22px 24px;
   height: 100%;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  box-shadow: var(--shadow);
 }
 
 .paper-card::-webkit-scrollbar {
   width: 4px;
 }
 .paper-card::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: var(--border-strong);
   border-radius: 2px;
 }
 
@@ -470,35 +516,41 @@ body {
 }
 
 .paper-venue-badge {
-  padding: 3px 10px;
-  border-radius: 20px;
-  background: var(--accent);
-  color: #fff;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent-glow);
   font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  font-weight: 600;
+  letter-spacing: 0.125px;
+  border: 1px solid rgba(0, 117, 222, 0.18);
 }
 
 .paper-citations {
   font-size: 0.75rem;
   color: var(--text-dim);
+  font-weight: 500;
 }
 
 .paper-oa-badge {
-  padding: 2px 8px;
-  border-radius: 10px;
-  background: var(--green);
-  color: #fff;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  background: rgba(26, 174, 57, 0.1);
+  color: #1aae39;
   font-size: 0.65rem;
-  font-weight: 700;
+  font-weight: 600;
+  border: 1px solid rgba(26, 174, 57, 0.18);
+  letter-spacing: 0.125px;
 }
 
 .paper-title {
-  font-size: 1rem;
+  font-family: var(--font-serif);
+  font-size: 1.375rem;
   font-weight: 700;
-  line-height: 1.3;
+  line-height: 1.27;
   color: var(--text);
+  letter-spacing: -0.25px;
+  margin-top: 4px;
 }
 
 .paper-authors {
@@ -530,8 +582,8 @@ body {
 }
 
 .claim-section {
-  background: linear-gradient(135deg, rgba(108, 92, 231, 0.08), rgba(16, 185, 129, 0.08));
-  border: 1px solid rgba(108, 92, 231, 0.2);
+  background: var(--accent-soft);
+  border: 1px solid rgba(0, 117, 222, 0.18);
   margin-bottom: 4px;
 }
 
@@ -563,12 +615,17 @@ body {
 }
 
 .section-label {
-  color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
+  font-family: var(--font);
 }
 
 .claim-section .section-label {
-  color: var(--green);
+  color: var(--accent);
   font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
 }
 
 .section-content {
@@ -576,10 +633,10 @@ body {
   overflow: hidden;
 }
 .section-content p {
-  font-size: 0.78rem;
+  font-size: 0.875rem;
   color: var(--text-secondary);
-  line-height: 1.45;
-  margin-bottom: 2px;
+  line-height: 1.6;
+  margin-bottom: 4px;
 }
 
 /* === Figures === */
@@ -1208,12 +1265,12 @@ body {
   font-size: 5rem;
 }
 .completion-title {
+  font-family: var(--font-serif);
   font-size: 2.5rem;
-  font-weight: 800;
-  background: linear-gradient(135deg, var(--accent), var(--green), var(--yellow));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -1px;
+  line-height: 1.1;
 }
 .completion-stats {
   display: flex;
@@ -1256,11 +1313,12 @@ body {
 }
 .badge-large {
   padding: 8px 20px;
-  border-radius: 20px;
-  background: linear-gradient(135deg, var(--accent), var(--green));
-  color: #fff;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent-glow);
   font-size: 0.9rem;
-  font-weight: 700;
+  font-weight: 600;
+  border: 1px solid rgba(0, 117, 222, 0.18);
 }
 
 /* === Spinner === */
@@ -1268,8 +1326,8 @@ body {
   display: inline-block;
   width: 18px;
   height: 18px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top-color: #fff;
+  border: 2px solid rgba(0, 0, 0, 0.15);
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
 }
@@ -1329,7 +1387,7 @@ body {
 }
 .search-progress-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--accent), var(--green));
+  background: var(--accent);
   border-radius: 2px;
 }
 .search-progress-venues {
@@ -1408,14 +1466,13 @@ body {
   text-align: center;
 }
 .loading-count-number {
+  font-family: var(--font-serif);
   font-size: 3rem;
-  font-weight: 800;
-  background: linear-gradient(135deg, var(--accent), var(--green));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  font-weight: 700;
+  color: var(--accent);
   font-variant-numeric: tabular-nums;
   line-height: 1;
+  letter-spacing: -1.5px;
 }
 .loading-count-label {
   font-size: 1rem;
