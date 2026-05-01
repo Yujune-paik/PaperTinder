@@ -662,9 +662,147 @@ async def get_deck(venue: str, year: int, offset: int = 0, limit: int = 0):
 # Admin: pre-build cards
 # ---------------------------------------------------------------------------
 
+@app.post("/api/admin/prebuild/init")
+async def admin_prebuild_init(req: SearchRequest, request: Request):
+    """Phase 1: search OpenAlex + populate decks. No PDF/GPT work here.
+
+    Designed to fit inside Vercel's 60-second function limit even for
+    venues with thousands of papers. The frontend then calls
+    ``/api/admin/prebuild/process`` repeatedly to do the heavy lifting
+    in small chunks.
+    """
+    auth_service.require_admin(request)
+    venue_papers: dict[str, list[str]] = {}
+    total = 0
+
+    async for event in semantic_scholar.stream_search_venues(
+        venues=req.venues, year=req.year,
+        keyword=req.keyword, limit_per_venue=req.limit,
+    ):
+        if event["type"] == "papers":
+            for p_data in event["papers"]:
+                meta = PaperMeta(**p_data)
+                _papers_cache[meta.paper_id] = meta
+                v = meta.venue or "unknown"
+                venue_papers.setdefault(v, []).append(meta.paper_id)
+                total += 1
+            _save_papers_cache()
+        elif event["type"] == "venue_done":
+            v_name = event["venue"]
+            v_total = event.get("venue_total", event.get("venue_count", 0))
+            prog = _load_progress(v_name, req.year)
+            prog.total = max(prog.total, v_total)
+            _save_progress(prog)
+
+    decks_saved: list[dict] = []
+    for venue_name, pids in venue_papers.items():
+        try:
+            storage.save_deck(venue_name, req.year, pids)
+            decks_saved.append({"venue": venue_name, "year": req.year, "count": len(pids)})
+        except Exception:
+            logger.warning(f"Failed to save deck {venue_name} {req.year}")
+
+    return {"status": "ok", "decks": decks_saved, "total": total}
+
+
+@app.post("/api/admin/prebuild/process")
+async def admin_prebuild_process(
+    request: Request,
+    venue: str,
+    year: int,
+    offset: int = 0,
+    limit: int = 4,
+):
+    """Phase 2: process one chunk of an already-saved deck.
+
+    Loads the deck saved by ``/api/admin/prebuild/init``, then runs
+    PDF download + GPT-4o summary + figure extraction for
+    ``paper_ids[offset:offset+limit]``. ``limit=4`` fits within
+    Vercel's 60s budget even when every paper is cold (≈12s each).
+
+    Streams SSE progress so the admin UI can show per-paper status,
+    then returns. The UI advances ``offset`` and calls again until
+    done.
+    """
+    auth_service.require_admin(request)
+
+    deck = storage.load_deck(venue, year)
+    if not deck:
+        raise HTTPException(404, f"No deck for {venue} {year}; run /init first")
+
+    paper_ids = deck.get("paper_ids") or []
+    total = len(paper_ids)
+    chunk_ids = paper_ids[offset : offset + limit]
+
+    async def event_stream():
+        yield f"data: {json.dumps({'type': 'chunk_start', 'offset': offset, 'limit': len(chunk_ids), 'total': total}, ensure_ascii=False)}\n\n"
+
+        for local_idx, pid in enumerate(chunk_ids):
+            global_idx = offset + local_idx
+            meta = _papers_cache.get(pid)
+            if not meta:
+                yield f"data: {json.dumps({'type': 'progress', 'current': global_idx + 1, 'total': total, 'paper_id': pid, 'title': pid, 'status': 'skipped', 'reason': 'metadata not in cache'}, ensure_ascii=False)}\n\n"
+                continue
+
+            paper_title = meta.title or "Untitled"
+            cached_summary = storage.load_summary(pid)
+            cached_figures = storage.load_figure_urls(pid)
+            has_summary = cached_summary and any(v for v in cached_summary.values())
+            has_figures = bool(cached_figures)
+
+            if has_summary and has_figures:
+                yield f"data: {json.dumps({'type': 'progress', 'current': global_idx + 1, 'total': total, 'paper_id': pid, 'title': paper_title, 'status': 'cached', 'has_summary': True, 'has_figures': True, 'figures_count': len(cached_figures)}, ensure_ascii=False)}\n\n"
+                continue
+
+            try:
+                doi = meta.doi
+                if not doi and meta.semantic_scholar_url and "doi.org/" in meta.semantic_scholar_url:
+                    doi = meta.semantic_scholar_url
+
+                figure_urls: list[str] = cached_figures or []
+                md_text = ""
+                if not has_figures or not has_summary:
+                    processed = await pdf_processor.process_pdf(meta.pdf_url, pid, doi)
+                    md_text = processed.markdown_text
+                    if not has_figures:
+                        figure_urls = processed.figure_paths
+                        if not figure_urls and doi:
+                            try:
+                                figure_urls = await pdf_processor.fetch_thumbnail(pid, doi)
+                            except Exception:
+                                pass
+                        if figure_urls:
+                            storage.save_figure_urls(pid, figure_urls)
+
+                if not has_summary:
+                    source_text = md_text or (meta.abstract or "")
+                    if source_text:
+                        full_text = ""
+                        async for chunk in summarizer.stream_quick_summary(meta, source_text):
+                            full_text += chunk
+                        parsed = summarizer.parse_tier1_response(full_text)
+                        if any((v or "").strip() for v in parsed.values()):
+                            storage.save_summary(pid, parsed)
+                            has_summary = True
+
+                has_figures = bool(figure_urls)
+                yield f"data: {json.dumps({'type': 'progress', 'current': global_idx + 1, 'total': total, 'paper_id': pid, 'title': paper_title, 'status': 'built', 'has_summary': has_summary, 'has_figures': has_figures, 'figures_count': len(figure_urls)}, ensure_ascii=False)}\n\n"
+
+            except Exception as e:
+                logger.exception(f"Prebuild process failed for {pid}")
+                yield f"data: {json.dumps({'type': 'progress', 'current': global_idx + 1, 'total': total, 'paper_id': pid, 'title': paper_title, 'status': 'error', 'error': str(e)}, ensure_ascii=False)}\n\n"
+
+        next_offset = offset + len(chunk_ids)
+        done = next_offset >= total
+        yield f"data: {json.dumps({'type': 'chunk_done', 'next_offset': next_offset, 'total': total, 'done': done}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
 @app.post("/api/admin/prebuild")
 async def admin_prebuild(req: SearchRequest, request: Request):
-    """Search papers then pre-generate summaries + figures for every card.
+    """Legacy single-call prebuild — kept for local development where there
+    is no Vercel function timeout. On Vercel, use /init + /process instead.
 
     Streams SSE progress so the admin page can show a live dashboard.
     On completion, saves the result as a deck per venue.

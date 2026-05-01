@@ -98,7 +98,9 @@ export default function AdminPage() {
     return true;
   });
 
-  // --- Build ---
+  // --- Build (resumable / chunked, fits Vercel's 60s function limit) ---
+  const CHUNK_SIZE = 4;
+
   const startBuild = async (venue, year) => {
     setBuildVenue(venue);
     setBuildYear(year);
@@ -110,45 +112,95 @@ export default function AdminPage() {
     abortRef.current = controller;
 
     try {
-      const res = await fetch("/api/admin/prebuild", {
+      // Phase 1: search OpenAlex + save deck. One call.
+      setBuildLog((prev) => [...prev, `→ ${venue} ${year} を OpenAlex で検索中…`]);
+      const initRes = await fetch("/api/admin/prebuild/init", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ venues: [venue], year, limit: 9999 }),
         signal: controller.signal,
       });
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (data.type === "phase") {
-              setBuildPhase(data.phase);
-              if (data.total) setBuildProgress((p) => ({ ...p, total: data.total }));
-            } else if (data.type === "progress") {
-              setBuildProgress({ current: data.current, total: data.total });
-              const status = data.has_figures ? "OK" : "NO IMG";
-              setBuildLog((prev) => [...prev.slice(-150),
-                `[${data.current}/${data.total}] ${status} | ${data.title}`]);
-            } else if (data.type === "done") {
-              setBuildPhase("done");
-              setBuildLog((prev) => [...prev,
-                `--- 完了: 画像なし ${(data.missing_figures || []).length}件, エラー ${(data.errors || []).length}件 ---`]);
-              fetchDecks();
-            }
-          } catch { /* ignore */ }
-        }
+      if (!initRes.ok) {
+        const text = await initRes.text();
+        throw new Error(`init failed: HTTP ${initRes.status} ${text}`);
       }
+      const initData = await initRes.json();
+      const total = initData.total || 0;
+      setBuildProgress({ current: 0, total });
+      setBuildPhase("build");
+      setBuildLog((prev) => [...prev,
+        `→ デッキ保存完了: ${total} 本`,
+        `→ チャンク (${CHUNK_SIZE} 本/回) でビルド開始…`,
+      ]);
+
+      // Phase 2: process chunks until done.
+      let offset = 0;
+      let totalCached = 0;
+      let totalBuilt = 0;
+      let totalErrors = 0;
+      let totalNoImg = 0;
+
+      while (offset < total) {
+        if (controller.signal.aborted) break;
+        const q = new URLSearchParams({
+          venue,
+          year: String(year),
+          offset: String(offset),
+          limit: String(CHUNK_SIZE),
+        });
+        const res = await fetch(`/api/admin/prebuild/process?${q}`, {
+          method: "POST",
+          credentials: "include",
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`process chunk @${offset}: HTTP ${res.status} ${text}`);
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let nextOffset = offset + CHUNK_SIZE;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop();
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.type === "progress") {
+                setBuildProgress({ current: data.current, total: data.total });
+                if (data.status === "cached") totalCached++;
+                else if (data.status === "built") totalBuilt++;
+                else if (data.status === "error") totalErrors++;
+                if (!data.has_figures && data.status !== "skipped") totalNoImg++;
+                const tag =
+                  data.status === "cached" ? "CACHE" :
+                  data.status === "error"  ? "ERR  " :
+                  data.has_figures         ? "OK   " : "NOIMG";
+                setBuildLog((prev) => [...prev.slice(-200),
+                  `[${data.current}/${data.total}] ${tag} | ${data.title}`]);
+              } else if (data.type === "chunk_done") {
+                nextOffset = data.next_offset;
+              }
+            } catch { /* ignore */ }
+          }
+        }
+        offset = nextOffset;
+      }
+
+      setBuildPhase("done");
+      setBuildLog((prev) => [...prev,
+        `--- 完了: キャッシュ ${totalCached}, 新規ビルド ${totalBuilt}, 画像なし ${totalNoImg}, エラー ${totalErrors} ---`,
+      ]);
+      fetchDecks();
     } catch (e) {
       if (e.name !== "AbortError") {
         setBuildLog((prev) => [...prev, `ERROR: ${e.message}`]);
